@@ -10,13 +10,24 @@ if [ -f .server.pid ]; then
     echo "Server process $PID was not running, cleaning up PID file."
   fi
   rm -f .server.pid
-else
-  # Fallback: check if port 3000 is occupied
-  PORT_PID=$(lsof -t -i:3000 2>/dev/null)
-  if [ -n "$PORT_PID" ]; then
-    kill "$PORT_PID"
-    echo "Stopped server running on port 3000 (PID: $PORT_PID)."
-  else
-    echo "No server running on port 3000."
-  fi
+fi
+
+# Always sweep port 3000 too, in case a process is bound there without a
+# matching PID file (e.g. started outside this script).
+PORT_PIDS=$(lsof -t -i:3000 2>/dev/null)
+if [ -n "$PORT_PIDS" ]; then
+  echo "$PORT_PIDS" | xargs -r kill
+  echo "Stopped stray server(s) on port 3000 (PID: $(echo $PORT_PIDS | tr '\n' ' '))."
+fi
+
+# Sweep any vite preview instances for this project that drifted to a
+# fallback port (pre-existing bug: previously started without --strictPort).
+STRAY_PIDS=$(pgrep -f "pdfeditor/node_modules/\.bin/vite preview" 2>/dev/null)
+if [ -n "$STRAY_PIDS" ]; then
+  echo "$STRAY_PIDS" | xargs -r kill
+  echo "Stopped stray preview process(es) (PID: $(echo $STRAY_PIDS | tr '\n' ' '))."
+fi
+
+if [ -z "$PORT_PIDS" ] && [ -z "$STRAY_PIDS" ] && [ ! -f .server.pid ]; then
+  echo "No server running."
 fi

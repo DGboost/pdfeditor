@@ -12,6 +12,16 @@ if [ -f .server.pid ]; then
   rm -f .server.pid
 fi
 
+# Second line of defense: refuse to start if something is already bound to
+# port 3000, even if .server.pid is missing/stale (e.g. process started
+# outside this script). Without this, vite would silently drift to 3001,
+# 3002, ... instead of failing, orphaning untracked servers.
+PORT_PID=$(lsof -t -i:3000 2>/dev/null)
+if [ -n "$PORT_PID" ]; then
+  echo "Port 3000 is already occupied (PID: $PORT_PID). Run ./stop.sh first."
+  exit 1
+fi
+
 # Install dependencies if node_modules is missing
 if [ ! -d node_modules ]; then
   echo "Installing dependencies..."
@@ -24,7 +34,7 @@ npm run build
 
 # Start the preview server in background
 echo "Starting server..."
-npx vite preview --port 3000 --host > server.log 2>&1 &
+npx vite preview --port 3000 --strictPort --host > server.log 2>&1 &
 echo $! > .server.pid
 
 # Wait a moment and verify the process is alive
