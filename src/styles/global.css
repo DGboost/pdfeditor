@@ -1,0 +1,36 @@
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { margin: 0; }
+
+@font-face {
+  font-family: 'FreeMono';
+  src: url('https://cdn.jsdelivr.net/gh/opensourcedesign/fonts/gnu-freefont_freemono/FreeMono.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Source Han Serif KR';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_two@1.0/NotoSerifKR.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+::selection { background: #FDE68A; }
+
+@keyframes pdfe-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes pdfe-spin { to { transform: rotate(360deg); } }
+@keyframes pdfe-toast-in { from { transform: translate(-50%, 12px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@keyframes pdfe-pop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+[contenteditable="true"]:focus { outline: 2px solid #2563a8; outline-offset: 3px; border-radius: 3px; }
+
+.pdfe-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+.pdfe-scroll::-webkit-scrollbar-thumb { background: rgba(20, 30, 45, .16); border-radius: 6px; }
+.pdfe-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* Move/delete controls on canvas overlay items (images, shapes, text boxes, signature fields)
+   stay hidden until the item is hovered, so the page isn't cluttered with buttons. */
+.pdfe-overlay-item .pdfe-overlay-btn { opacity: 0; pointer-events: none; transition: opacity .12s; }
+.pdfe-overlay-item:hover .pdfe-overlay-btn { opacity: 1; pointer-events: auto; }
