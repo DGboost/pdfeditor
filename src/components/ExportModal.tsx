@@ -1,4 +1,4 @@
-import { ACCENT, BORDER, solidAccentBtn } from '../styles/theme';
+import { ACCENT, BORDER, SURFACE, TEXT_MUTED, TEXT_SUBTLE, BORDER_SOFT, solidAccentBtn } from '../styles/theme';
 import type { ExportSettings, ExportFormat } from '../types/pdfEditor';
 
 export interface ExportModalProps {
@@ -11,7 +11,7 @@ export interface ExportModalProps {
   onSaveToArchive: () => void;
 }
 
-const fmtBase: React.CSSProperties = { flex: 1, border: `1px solid ${BORDER}`, background: '#fff', borderRadius: '7px', padding: '10px 4px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Pretendard',sans-serif", color: 'oklch(40% 0.02 250)' };
+const fmtBase: React.CSSProperties = { flex: 1, border: `1px solid ${BORDER}`, background: SURFACE, borderRadius: '7px', padding: '10px 4px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Pretendard',sans-serif", color: TEXT_MUTED };
 
 export function ExportModal({ open, exportSettings, setExportSettings, isExporting, onClose, onDownload, onSaveToArchive }: ExportModalProps) {
   if (!open) return null;
@@ -22,7 +22,7 @@ export function ExportModal({ open, exportSettings, setExportSettings, isExporti
 
   const onAction = () => (isPdf ? onDownload() : onSaveToArchive());
   const actionBtnStyle: React.CSSProperties = isPdf && isExporting
-    ? { width: '100%', background: 'oklch(88% 0.01 250)', color: 'oklch(55% 0.02 250)', border: 'none', borderRadius: '9px', padding: '12px', fontSize: '13.5px', fontWeight: 700, cursor: 'not-allowed', fontFamily: "'Pretendard',sans-serif" }
+    ? { width: '100%', background: BORDER_SOFT, color: TEXT_SUBTLE, border: 'none', borderRadius: '9px', padding: '12px', fontSize: '13.5px', fontWeight: 700, cursor: 'not-allowed', fontFamily: "'Pretendard',sans-serif" }
     : { ...solidAccentBtn({ padding: '12px', fontSize: '13.5px', borderRadius: '9px' }), width: '100%' };
   const actionLabel = isPdf ? (isExporting ? '내보내는 중…' : 'PDF 다운로드') : '보관함에 저장';
 
@@ -32,15 +32,15 @@ export function ExportModal({ open, exportSettings, setExportSettings, isExporti
       onClick={onClose}
     >
       <div
-        style={{ background: '#fff', borderRadius: 14, padding: 24, width: 420, maxWidth: '92vw', boxShadow: '0 20px 60px rgba(0,0,0,.25)', fontFamily: "'Pretendard',sans-serif" }}
+        style={{ background: SURFACE, borderRadius: 14, padding: 24, width: 420, maxWidth: '92vw', boxShadow: '0 20px 60px rgba(0,0,0,.25)', fontFamily: "'Pretendard',sans-serif" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
           <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>내보내기</h2>
-          <button onClick={onClose} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: 'oklch(50% 0.02 250)', lineHeight: 1, padding: 4 }}>×</button>
+          <button onClick={onClose} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: TEXT_SUBTLE, lineHeight: 1, padding: 4 }}>×</button>
         </div>
 
-        <div style={{ background: '#fff', border: `1px solid ${BORDER}`, borderRadius: 10, padding: '15px 16px', marginBottom: 16 }}>
+        <div style={{ background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 10, padding: '15px 16px', marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>내보내기 형식</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => setFormat('pdf')} style={exportSettings.format === 'pdf' ? fmtActive : fmtBase}>PDF</button>

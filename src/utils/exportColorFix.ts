@@ -1,8 +1,8 @@
 /**
  * html2canvas 1.4.1 bundles its own CSS color parser, which predates (and does not understand)
- * modern CSS Color 4/5 functions like oklch()/color-mix() — the whole app's design tokens use
- * oklch() throughout (see styles/theme.ts), so calling html2canvas directly on any part of this
- * UI throws ("Attempting to parse an unsupported color function") instead of rendering.
+ * modern CSS Color 4/5 functions like oklch()/color-mix() — the app's design tokens lean on
+ * color-mix() for accent tinting (see styles/theme.ts), so calling html2canvas directly on any
+ * part of this UI throws ("Attempting to parse an unsupported color function") instead of rendering.
  *
  * Fix: right before html2canvas rasterizes its cloned copy of the DOM (its `onclone` hook), walk
  * every element and rewrite any computed color-bearing property that still contains oklch()/

@@ -1,9 +1,9 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import type { RefObject } from 'react';
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, KeyboardEvent } from 'react';
 import type { Page, Signatures, Tool, SigModalTarget, DragKind } from '../../../types/pdfEditor';
 import type { EditableBlockField } from '../../../hooks/useDocumentReducer';
-import { ACCENT, BORDER, CANVAS_BG, PAGE_SHADOW, TOOLBAR_H, FORMAT_H, RAIL_CARD_H, RAIL_GAP, TOOL_BTN, FONT_STACK, solidAccentBtn, outlineAccentBtn, spinnerAccentStyle } from '../../../styles/theme';
+import { ACCENT, BORDER, BORDER_SOFT, BORDER_STRONG, SURFACE, PAGE, TEXT, TEXT_MUTED, TEXT_SUBTLE, CANVAS_BG, PAGE_SHADOW, TOOLBAR_H, FORMAT_H, RAIL_CARD_H, RAIL_GAP, TOOL_BTN, FONT_STACK, solidAccentBtn, outlineAccentBtn, spinnerAccentStyle, toolBase, toolActive, toolDisabled } from '../../../styles/theme';
 import { useCanvasPointerInteractions } from '../../../hooks/useCanvasPointerInteractions';
 import { useSelectionPreserve } from '../../../hooks/useSelectionPreserve';
 
@@ -30,6 +30,7 @@ export interface EditorDocActions {
   updateTextItem: (pageId: string, itemId: string, html: string) => void;
   updateBlock: (pageId: string, blockId: string, field: EditableBlockField, html: string) => void;
   updateTextBoxText: (pageId: string, id: string, html: string) => void;
+  restoreState: (state: any) => void;
   pushHistory: () => void;
   undo: () => void;
   redo: () => void;
@@ -128,6 +129,15 @@ export function EditorScreen(props: EditorScreenProps) {
   // ---- Selection formatting ----
   const sel = useSelectionPreserve(pageWrapRef, showToast);
 
+  // ---- Scroll active thumbnail into view ----
+  useEffect(() => {
+    if (!activePageId) return;
+    const activeThumb = document.getElementById(`pdfe-thumb-${activePageId}`);
+    if (activeThumb) {
+      activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [activePageId]);
+
   // ---- Tool selection ----
   const selectTool = useCallback((name: Tool) => setActiveTool(name), [setActiveTool]);
 
@@ -224,9 +234,6 @@ export function EditorScreen(props: EditorScreenProps) {
   const stopProp = (e: ReactMouseEvent) => e.stopPropagation();
 
   // ---- Derived styles ----
-  const toolBase: React.CSSProperties = { width: TOOL_BTN, height: TOOL_BTN, flex: `0 0 ${TOOL_BTN}px`, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT_STACK, color: 'oklch(40% 0.02 250)' };
-  const toolActive: React.CSSProperties = { ...toolBase, background: 'oklch(93% 0.03 250)', color: ACCENT };
-  const toolDisabled: React.CSSProperties = { ...toolBase, color: 'oklch(78% 0.01 250)', cursor: 'not-allowed' };
 
   const isTextEditable = t !== 'image' && t !== 'signature' && t !== 'pan';
   const textLayerInteractive = t === 'select' || t === 'text';
@@ -243,21 +250,21 @@ export function EditorScreen(props: EditorScreenProps) {
     : { position: 'relative', flex: 'none', zoom: zoom };
 
   const pageWrapStyle: React.CSSProperties = activePageIsPdf
-    ? { width: activePage.imgW!, height: activePage.imgH!, flex: 'none', background: '#fff', boxShadow: PAGE_SHADOW, position: 'absolute', top: 0, left: 0, overflow: 'hidden', fontFamily: "'Noto Serif KR',serif", cursor: t === 'pan' ? 'grab' : (t === 'image' || t === 'signature' || t === 'text' || t === 'shape') ? 'crosshair' : 'default', transform: mainRotTransform, transformOrigin: mainRotOrigin }
-    : { width: '800px', minHeight: '1040px', flex: 'none', background: '#fff', boxShadow: PAGE_SHADOW, position: 'relative', overflow: mainRot ? 'visible' : 'hidden', padding: '64px 68px', fontFamily: "'Noto Serif KR',serif", cursor: t === 'pan' ? 'grab' : (t === 'image' || t === 'signature' || t === 'shape') ? 'crosshair' : 'text', transform: mainRot ? `rotate(${mainRot}deg)` : 'none', transformOrigin: 'center center' };
+    ? { width: activePage.imgW!, height: activePage.imgH!, flex: 'none', background: PAGE, boxShadow: PAGE_SHADOW, position: 'absolute', top: 0, left: 0, overflow: 'hidden', fontFamily: "'Noto Serif KR',serif", cursor: t === 'pan' ? 'grab' : (t === 'image' || t === 'signature' || t === 'text' || t === 'shape') ? 'crosshair' : 'default', transform: mainRotTransform, transformOrigin: mainRotOrigin }
+    : { width: '800px', minHeight: '1040px', flex: 'none', background: PAGE, boxShadow: PAGE_SHADOW, position: 'relative', overflow: mainRot ? 'visible' : 'hidden', padding: '64px 68px', fontFamily: "'Noto Serif KR',serif", cursor: t === 'pan' ? 'grab' : (t === 'image' || t === 'signature' || t === 'shape') ? 'crosshair' : 'text', transform: mainRot ? `rotate(${mainRot}deg)` : 'none', transformOrigin: 'center center' };
 
   const scrollAreaStyle: React.CSSProperties = { flex: 1, overflow: 'auto', background: CANVAS_BG, padding: '40px 0 90px', display: 'flex', justifyContent: 'center', cursor: t === 'pan' ? 'grab' : 'default', transition: 'background .2s' };
 
-  const railPanelStyle: React.CSSProperties = { width: (railOpen ? RAIL_OPEN_W : RAIL_COLLAPSED_W), flex: `0 0 ${(railOpen ? RAIL_OPEN_W : RAIL_COLLAPSED_W)}px`, borderRight: `1px solid ${BORDER}`, background: '#fbfbfa', display: 'flex', flexDirection: 'column', transition: 'flex-basis .15s ease' };
-  const panelCollapseBtnStyle: React.CSSProperties = { border: 'none', background: 'none', cursor: 'pointer', color: 'oklch(45% 0.02 250)', width: 22, height: 22, flex: '0 0 22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, borderRadius: 5 };
-  const panelExpandBtnStyle: React.CSSProperties = { border: 'none', background: 'none', cursor: 'pointer', color: 'oklch(45% 0.02 250)', width: '100%', height: 40, flex: '0 0 40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 };
+  const railPanelStyle: React.CSSProperties = { width: (railOpen ? RAIL_OPEN_W : RAIL_COLLAPSED_W), flex: `0 0 ${(railOpen ? RAIL_OPEN_W : RAIL_COLLAPSED_W)}px`, borderRight: `1px solid ${BORDER}`, background: SURFACE, display: 'flex', flexDirection: 'column', transition: 'flex-basis .15s ease' };
+  const panelCollapseBtnStyle: React.CSSProperties = { border: 'none', background: 'none', cursor: 'pointer', color: TEXT_MUTED, width: 22, height: 22, flex: '0 0 22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, borderRadius: 8 };
+  const panelExpandBtnStyle: React.CSSProperties = { border: 'none', background: 'none', cursor: 'pointer', color: TEXT_MUTED, width: '100%', height: 40, flex: '0 0 40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 };
 
   const exportCtaBtnStyle = solidAccentBtn({ padding: '9px 20px', fontSize: '13.5px' });
   const applySelectionBtnStyle = outlineAccentBtn({ height: 30, padding: '0 12px', fontSize: '12.5px', flex: '0 0 auto', whiteSpace: 'nowrap' });
   const applyAllBtnStyle = solidAccentBtn({ height: 30, padding: '0 12px', fontSize: '12.5px', flex: '0 0 auto', whiteSpace: 'nowrap', borderRadius: '6px' });
 
-  const toolbarRowStyle: React.CSSProperties = { height: TOOLBAR_H, flex: `0 0 ${TOOLBAR_H}px`, display: 'flex', alignItems: 'center', gap: 5, padding: '0 14px', borderBottom: `1px solid ${BORDER}`, background: '#fff', transition: 'flex-basis .15s' };
-  const formatRowStyle: React.CSSProperties = { height: FORMAT_H, flex: `0 0 ${FORMAT_H}px`, display: 'flex', alignItems: 'center', padding: '0 18px', borderBottom: `1px solid ${BORDER}`, background: '#fbfbfa', gap: 8, overflowX: 'auto', transition: 'flex-basis .15s' };
+  const toolbarRowStyle: React.CSSProperties = { height: TOOLBAR_H, flex: `0 0 ${TOOLBAR_H}px`, display: 'flex', alignItems: 'center', gap: 5, padding: '0 14px', borderBottom: `1px solid ${BORDER}`, background: SURFACE, transition: 'flex-basis .15s' };
+  const formatRowStyle: React.CSSProperties = { height: FORMAT_H, flex: `0 0 ${FORMAT_H}px`, display: 'flex', alignItems: 'center', padding: '0 18px', borderBottom: `1px solid ${BORDER}`, background: SURFACE, gap: 8, overflowX: 'auto', transition: 'flex-basis .15s' };
   const railListStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', padding: '6px 14px 14px', display: 'flex', flexDirection: 'column', gap: RAIL_GAP };
 
   const activePagePending = activePageIsPdf && !!(activePage as any).pending;
@@ -265,22 +272,92 @@ export function EditorScreen(props: EditorScreenProps) {
 
   return (
     <div data-screen-label="편집기" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <div style={{ height: 56, flex: '0 0 56px', display: 'flex', alignItems: 'center', padding: '0 18px', borderBottom: `1px solid ${BORDER}`, background: '#fff', gap: 16 }}>
-        <button onClick={goToUpload} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'oklch(45% 0.02 250)', fontSize: 13, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 4px' }}>
-          <div style={{ width: 7, height: 7, borderLeft: '2px solid currentColor', borderBottom: '2px solid currentColor', transform: 'rotate(45deg)' }} />
-          목록
-        </button>
-        <div style={{ width: 1, height: 20, background: BORDER }} />
-        <div contentEditable suppressContentEditableWarning style={{ fontSize: 14, fontWeight: 600, padding: '4px 6px', borderRadius: 5, minWidth: 60 }} onBlur={(e) => onFileNameChange(e.currentTarget.textContent || '')}>
-          {fileName}
+      {/* Header (Matching HWP Editor Perfectly with Centered Filename) */}
+      <div
+        style={{
+          height: 60,
+          flex: '0 0 60px',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 28px',
+          borderBottom: `1px solid ${BORDER}`,
+          background: SURFACE,
+          position: 'relative',
+          boxSizing: 'border-box'
+        }}
+      >
+        {/* Left Side: Brand Logo acting as "Exit/Back to Upload Screen" */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <button
+            onClick={goToUpload}
+            style={{
+              fontSize: 19,
+              fontWeight: 800,
+              letterSpacing: '-.6px',
+              color: TEXT,
+              padding: 0,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: "'Pretendard',system-ui,sans-serif",
+              transition: 'opacity .12s'
+            }}
+            title="목록으로 이동"
+          >
+            PDF 편집
+          </button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'oklch(55% 0.02 250)' }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'oklch(55% 0.13 150)', animation: 'pdfe-pulse 2s ease-in-out infinite' }} />
-          자동 저장됨
+
+        {/* Center: File Name (Elegant, Centered, contentEditable, beautiful text styling) */}
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontFamily: "'Pretendard',system-ui,sans-serif"
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3d5afe" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+            <line x1="10" y1="9" x2="8" y2="9" />
+          </svg>
+          <div
+            contentEditable
+            suppressContentEditableWarning
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: TEXT,
+              outline: 'none',
+              borderBottom: '1px dashed transparent',
+              cursor: 'text',
+              padding: '2px 4px',
+              borderRadius: 4,
+              transition: 'border-color .15s'
+            }}
+            onBlur={(e) => onFileNameChange(e.currentTarget.textContent || '')}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--pdfe-border-strong, #d7d7dd)'; }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+          >
+            {fileName}
+          </div>
         </div>
+
+        {/* Right Side: Auto-Saved indicator & Export button */}
         <div style={{ flex: 1 }} />
-        <button onClick={goExport} style={exportCtaBtnStyle}>내보내기</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: TEXT_SUBTLE, fontFamily: "'Pretendard',system-ui,sans-serif", fontWeight: 500 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', animation: 'pdfe-pulse 2s ease-in-out infinite' }} />
+            <span>자동 저장됨</span>
+          </div>
+          <button onClick={goExport} style={exportCtaBtnStyle}>내보내기</button>
+        </div>
       </div>
 
       {/* Toolbar */}
@@ -291,12 +368,19 @@ export function EditorScreen(props: EditorScreenProps) {
             <div style={{ background: 'currentColor', borderRadius: 1 }} /><div style={{ background: 'currentColor', borderRadius: 1 }} />
           </div>
         </button>
-        <div style={{ width: 1, height: 22, background: 'oklch(88% 0.01 250)' }} />
-        <button onClick={() => selectTool('pan')} title="손 도구" style={t === 'pan' ? toolActive : toolBase}><div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: '3px 3px 3px 0', transform: 'rotate(45deg)' }} /></button>
+        <div style={{ width: 1, height: 22, background: BORDER_SOFT }} />
+        <button onClick={() => selectTool('pan')} title="손 도구" style={t === 'pan' ? toolActive : toolBase}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5" />
+            <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v6" />
+            <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+            <path d="M18 8a2 2 0 0 1 2 2v6a6 6 0 0 1-6 6h-2c-2.11 0-4.1-.82-5.58-2.33L4 13.5a1.5 1.5 0 0 1 2.12-2.12L9 14.25V11" />
+          </svg>
+        </button>
         <button onClick={() => selectTool('select')} title="선택" style={t === 'select' ? toolActive : toolBase}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /></svg>
         </button>
-        <div style={{ width: 1, height: 22, background: 'oklch(88% 0.01 250)' }} />
+        <div style={{ width: 1, height: 22, background: BORDER_SOFT }} />
         <button onClick={() => selectTool('text')} title="텍스트" style={t === 'text' ? toolActive : toolBase}><span style={{ fontSize: 15, fontWeight: 800 }}>T</span></button>
         <button onClick={() => selectTool('image')} title="이미지" style={t === 'image' ? toolActive : toolBase}><div style={{ width: 15, height: 12, border: '2px solid currentColor', borderRadius: 2 }} /></button>
         <button onClick={() => selectTool('shape')} title="도형" style={t === 'shape' ? toolActive : toolBase}><div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2 }} /></button>
@@ -312,49 +396,49 @@ export function EditorScreen(props: EditorScreenProps) {
 
       {/* Format bar */}
       <div style={formatRowStyle}>
-        <select value={fontToolFamily} onChange={onFontFamilyChange} onMouseDown={sel.preserveTextSelection} style={{ height: 30, border: '1px solid oklch(85% 0.01 250)', borderRadius: 6, background: '#fff', fontSize: '12.5px', padding: '0 8px', fontFamily: 'inherit', color: 'oklch(25% 0.02 250)', flex: '0 0 auto' }}>
+        <select value={fontToolFamily} onChange={onFontFamilyChange} onMouseDown={sel.preserveTextSelection} style={{ height: 30, border: `1px solid ${BORDER_STRONG}`, borderRadius: 6, background: SURFACE, fontSize: '12.5px', padding: '0 8px', fontFamily: 'inherit', color: TEXT, flex: '0 0 auto' }}>
           {FONT_FAMILY_OPTIONS.map((fo) => <option key={fo.value} value={fo.value} style={{ fontFamily: fo.value }}>{fo.label}</option>)}
         </select>
         <div style={{ display: 'flex', alignItems: 'center', gap: 0, flex: '0 0 auto' }}>
-          <button onClick={sizeDecClick} onMouseDown={sel.preserveTextSelection} style={{ width: 24, height: 30, border: '1px solid oklch(85% 0.01 250)', borderRight: 'none', borderRadius: '6px 0 0 6px', background: '#fff', cursor: 'pointer', fontSize: 13, color: 'oklch(35% 0.02 250)' }}>−</button>
-          <input type="text" inputMode="numeric" value={fontToolSizeInput} onChange={onFontSizeChange} onBlur={onFontSizeBlur} onMouseDown={sel.preserveTextSelection} style={{ width: 38, height: 30, border: '1px solid oklch(85% 0.01 250)', background: '#fff', fontSize: '12.5px', padding: '0 4px', fontFamily: 'inherit', color: 'oklch(25% 0.02 250)', textAlign: 'center' }} />
-          <button onClick={sizeIncClick} onMouseDown={sel.preserveTextSelection} style={{ width: 24, height: 30, border: '1px solid oklch(85% 0.01 250)', borderLeft: 'none', borderRadius: '0 6px 6px 0', background: '#fff', cursor: 'pointer', fontSize: 13, color: 'oklch(35% 0.02 250)' }}>+</button>
+          <button onClick={sizeDecClick} onMouseDown={sel.preserveTextSelection} style={{ width: 24, height: 30, border: `1px solid ${BORDER_STRONG}`, borderRight: 'none', borderRadius: '6px 0 0 6px', background: SURFACE, cursor: 'pointer', fontSize: 13, color: TEXT_MUTED }}>−</button>
+          <input type="text" inputMode="numeric" value={fontToolSizeInput} onChange={onFontSizeChange} onBlur={onFontSizeBlur} onMouseDown={sel.preserveTextSelection} style={{ width: 38, height: 30, border: `1px solid ${BORDER_STRONG}`, background: SURFACE, fontSize: '12.5px', padding: '0 4px', fontFamily: 'inherit', color: TEXT, textAlign: 'center' }} />
+          <button onClick={sizeIncClick} onMouseDown={sel.preserveTextSelection} style={{ width: 24, height: 30, border: `1px solid ${BORDER_STRONG}`, borderLeft: 'none', borderRadius: '0 6px 6px 0', background: SURFACE, cursor: 'pointer', fontSize: 13, color: TEXT_MUTED }}>+</button>
         </div>
-        <span style={{ fontSize: '11.5px', color: 'oklch(55% 0.02 250)', flex: '0 0 auto' }}>px</span>
-        <div style={{ width: 1, height: 20, background: 'oklch(88% 0.01 250)', flex: '0 0 auto' }} />
-        <button onClick={sel.applyBold} onMouseDown={sel.preserveTextSelection} title="굵게" style={{ width: 30, height: 30, flex: '0 0 auto', border: '1px solid oklch(85% 0.01 250)', background: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 800, color: 'oklch(30% 0.02 250)' }}>B</button>
-        <div style={{ width: 1, height: 20, background: 'oklch(88% 0.01 250)', flex: '0 0 auto' }} />
-        <button onClick={() => sel.applyAlign('Left')} onMouseDown={sel.preserveTextSelection} title="왼쪽 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: '1px solid oklch(85% 0.01 250)', background: '#fff', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: '11.5px', color: TEXT_SUBTLE, flex: '0 0 auto' }}>px</span>
+        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
+        <button onClick={sel.applyBold} onMouseDown={sel.preserveTextSelection} title="굵게" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 800, color: TEXT }}>B</button>
+        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
+        <button onClick={() => sel.applyAlign('Left')} onMouseDown={sel.preserveTextSelection} title="왼쪽 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: 15, height: 11, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div style={{ width: 15, height: 2, background: 'oklch(35% 0.02 250)' }} /><div style={{ width: 10, height: 2, background: 'oklch(35% 0.02 250)' }} /><div style={{ width: 13, height: 2, background: 'oklch(35% 0.02 250)' }} />
+            <div style={{ width: 15, height: 2, background: TEXT_MUTED }} /><div style={{ width: 10, height: 2, background: TEXT_MUTED }} /><div style={{ width: 13, height: 2, background: TEXT_MUTED }} />
           </div>
         </button>
-        <button onClick={() => sel.applyAlign('Center')} onMouseDown={sel.preserveTextSelection} title="가운데 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: '1px solid oklch(85% 0.01 250)', background: '#fff', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <button onClick={() => sel.applyAlign('Center')} onMouseDown={sel.preserveTextSelection} title="가운데 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: 15, height: 11, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ width: 15, height: 2, background: 'oklch(35% 0.02 250)' }} /><div style={{ width: 9, height: 2, background: 'oklch(35% 0.02 250)' }} /><div style={{ width: 12, height: 2, background: 'oklch(35% 0.02 250)' }} />
+            <div style={{ width: 15, height: 2, background: TEXT_MUTED }} /><div style={{ width: 9, height: 2, background: TEXT_MUTED }} /><div style={{ width: 12, height: 2, background: TEXT_MUTED }} />
           </div>
         </button>
-        <button onClick={() => sel.applyAlign('Right')} onMouseDown={sel.preserveTextSelection} title="오른쪽 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: '1px solid oklch(85% 0.01 250)', background: '#fff', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <button onClick={() => sel.applyAlign('Right')} onMouseDown={sel.preserveTextSelection} title="오른쪽 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: 15, height: 11, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-            <div style={{ width: 15, height: 2, background: 'oklch(35% 0.02 250)' }} /><div style={{ width: 10, height: 2, background: 'oklch(35% 0.02 250)' }} /><div style={{ width: 13, height: 2, background: 'oklch(35% 0.02 250)' }} />
+            <div style={{ width: 15, height: 2, background: TEXT_MUTED }} /><div style={{ width: 10, height: 2, background: TEXT_MUTED }} /><div style={{ width: 13, height: 2, background: TEXT_MUTED }} />
           </div>
         </button>
-        <div style={{ width: 1, height: 20, background: 'oklch(88% 0.01 250)', flex: '0 0 auto' }} />
+        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
         {COLOR_SWATCHES.map((hex) => (
-          <button key={hex} onClick={() => sel.applyColor(hex)} onMouseDown={sel.preserveTextSelection} title={hex} style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: '50%', border: '2px solid #fff', boxShadow: `0 0 0 1px ${BORDER}`, background: hex, cursor: 'pointer', padding: 0 }} />
+          <button key={hex} onClick={() => sel.applyColor(hex)} onMouseDown={sel.preserveTextSelection} title={hex} style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: '50%', border: `2px solid ${SURFACE}`, boxShadow: `0 0 0 1px ${BORDER}`, background: hex, cursor: 'pointer', padding: 0 }} />
         ))}
-        <div style={{ width: 1, height: 20, background: 'oklch(88% 0.01 250)', flex: '0 0 auto' }} />
+        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
         {HIGHLIGHT_SWATCHES.map((hex) => (
-          <button key={hex} onClick={() => sel.applyHighlight(hex)} onMouseDown={sel.preserveTextSelection} title={`배경색 (${hex})`} style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 5, border: '2px solid #fff', boxShadow: `0 0 0 1px ${BORDER}`, background: hex, cursor: 'pointer', padding: 0 }} />
+          <button key={hex} onClick={() => sel.applyHighlight(hex)} onMouseDown={sel.preserveTextSelection} title={`배경색 (${hex})`} style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 5, border: `2px solid ${SURFACE}`, boxShadow: `0 0 0 1px ${BORDER}`, background: hex, cursor: 'pointer', padding: 0 }} />
         ))}
-        <button onClick={() => sel.applyHighlight('transparent')} onMouseDown={sel.preserveTextSelection} title="배경색 지우기" style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#fff', cursor: 'pointer', padding: 0, position: 'relative' }}>
-          <div style={{ position: 'absolute', left: 2, right: 2, top: '50%', height: 1.5, background: 'oklch(55% 0.16 25)', transform: 'translateY(-50%) rotate(-45deg)' }} />
+        <button onClick={() => sel.applyHighlight('transparent')} onMouseDown={sel.preserveTextSelection} title="배경색 지우기" style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 5, border: `1px solid ${BORDER}`, background: SURFACE, cursor: 'pointer', padding: 0, position: 'relative' }}>
+          <div style={{ position: 'absolute', left: 2, right: 2, top: '50%', height: 1.5, background: '#e0553d', transform: 'translateY(-50%) rotate(-45deg)' }} />
         </button>
-        <div style={{ width: 1, height: 20, background: 'oklch(88% 0.01 250)', flex: '0 0 auto' }} />
+        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
         <button onClick={applyFontToSelection} onMouseDown={sel.preserveTextSelection} style={applySelectionBtnStyle}>선택 적용</button>
         <button onClick={applyFontToAll} onMouseDown={sel.preserveTextSelection} style={applyAllBtnStyle}>전체 적용</button>
         {(gFam || gSize) && (
-          <button onClick={resetGlobalFont} style={{ height: 30, flex: '0 0 auto', whiteSpace: 'nowrap', border: 'none', background: 'none', color: 'oklch(50% 0.02 250)', borderRadius: 6, padding: '0 8px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>되돌리기</button>
+          <button onClick={resetGlobalFont} style={{ height: 30, flex: '0 0 auto', whiteSpace: 'nowrap', border: 'none', background: 'none', color: TEXT_SUBTLE, borderRadius: 6, padding: '0 8px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>되돌리기</button>
         )}
       </div>
 
@@ -364,7 +448,7 @@ export function EditorScreen(props: EditorScreenProps) {
         <div style={railPanelStyle}>
           {railOpen ? (
             <>
-              <div style={{ padding: '14px 14px 6px', fontSize: '11.5px', fontWeight: 700, color: 'oklch(50% 0.02 250)', letterSpacing: '.04em', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ padding: '14px 14px 6px', fontSize: '11.5px', fontWeight: 700, color: TEXT_SUBTLE, letterSpacing: '.04em', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>페이지 ({pages.length})</span>
                 <button onClick={() => setRailOpen(false)} title="목록 접기" style={panelCollapseBtnStyle}>‹</button>
               </div>
@@ -377,6 +461,7 @@ export function EditorScreen(props: EditorScreenProps) {
                   return (
                     <div
                       key={p.id}
+                      id={`pdfe-thumb-${p.id}`}
                       draggable
                       data-page-id={p.id}
                       onDragStart={onThumbDragStart}
@@ -390,34 +475,37 @@ export function EditorScreen(props: EditorScreenProps) {
                         onMouseEnter={(e) => setHoveredPageId((e.currentTarget as HTMLElement).dataset.pageId || null)}
                         onMouseLeave={() => setHoveredPageId(null)}
                         style={{
-                          width: '100%', height: RAIL_CARD_H, background: '#fff', borderRadius: 6, position: 'relative',
+                          width: '100%', height: RAIL_CARD_H, background: PAGE, borderRadius: 10, position: 'relative',
                           border: isActive ? `2px solid ${ACCENT}` : `1px solid ${BORDER}`,
                           boxShadow: isActive ? `0 0 0 3px color-mix(in srgb, ${ACCENT} 12%, transparent)` : 'none',
                           display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 8, overflow: 'hidden',
                         }}
                       >
-                        <div style={{ position: 'absolute', inset: 0, background: isPdf && thumb ? `#fff url(${thumb}) no-repeat center / cover` : 'transparent', ...rotTransform(rot) }} />
-                        {!isPdf && <span style={{ position: 'relative', fontSize: '10.5px', color: 'oklch(55% 0.02 250)', fontFamily: "'Noto Serif KR',serif" }}>{p.label}</span>}
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'rgba(20,28,42,.4)', opacity: hoveredPageId === p.id ? 1 : 0, transition: 'opacity .12s', borderRadius: 5, pointerEvents: hoveredPageId === p.id ? 'auto' : 'none' }}>
-                          <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onDuplicatePage(p.id); }} title="복제" style={{ width: 26, height: 26, borderRadius: '50%', background: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)' }}>
+                        <div style={{ position: 'absolute', inset: 0, background: isPdf && thumb ? `${PAGE} url(${thumb}) no-repeat center / cover` : 'transparent', ...rotTransform(rot) }} />
+                        {!isPdf && <span style={{ position: 'relative', fontSize: '10.5px', color: '#9a9aa2', fontFamily: "'Noto Serif KR',serif" }}>{p.label}</span>}
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'rgba(20,28,42,.4)', opacity: hoveredPageId === p.id ? 1 : 0, transition: 'opacity .12s', borderRadius: 8, pointerEvents: hoveredPageId === p.id ? 'auto' : 'none' }}>
+                          <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onDuplicatePage(p.id); }} title="복제" style={{ width: 26, height: 26, borderRadius: '50%', background: PAGE, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)' }}>
                             <div style={{ width: 11, height: 11, position: 'relative' }}>
-                              <div style={{ position: 'absolute', left: 0, top: 0, width: 8, height: 8, border: '1.5px solid oklch(35% 0.02 250)', borderRadius: 1 }} />
-                              <div style={{ position: 'absolute', right: 0, bottom: 0, width: 8, height: 8, border: '1.5px solid oklch(35% 0.02 250)', borderRadius: 1, background: '#fff' }} />
+                              <div style={{ position: 'absolute', left: 0, top: 0, width: 8, height: 8, border: '1.5px solid #4a4a52', borderRadius: 1 }} />
+                              <div style={{ position: 'absolute', right: 0, bottom: 0, width: 8, height: 8, border: '1.5px solid #4a4a52', borderRadius: 1, background: PAGE }} />
                             </div>
                           </button>
-                          <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onRotatePage(p.id, 90); }} title="회전 (PDF 페이지만 지원)" style={{ width: 26, height: 26, borderRadius: '50%', background: '#fff', border: 'none', cursor: isPdf ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)', opacity: isPdf ? 1 : 0.4 }}>
-                            <div style={{ width: 12, height: 12, border: '1.5px solid oklch(35% 0.02 250)', borderRadius: '50%', borderBottomColor: 'transparent', borderLeftColor: 'transparent' }} />
-                          </button>
-                          <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onDeletePage(p.id); }} title="삭제" style={{ width: 26, height: 26, borderRadius: '50%', background: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)', fontSize: 14, color: 'oklch(45% 0.15 25)', lineHeight: 1 }}>×</button>
+                           <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onRotatePage(p.id, 90); }} title="회전 (PDF 페이지만 지원)" style={{ width: 26, height: 26, borderRadius: '50%', background: PAGE, border: 'none', cursor: isPdf ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)', opacity: isPdf ? 1 : 0.4 }}>
+                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4a4a52" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                               <path d="M23 4v6h-6" />
+                               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                             </svg>
+                           </button>
+                          <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onDeletePage(p.id); }} title="삭제" style={{ width: 26, height: 26, borderRadius: '50%', background: PAGE, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)', fontSize: 14, color: '#e0553d', lineHeight: 1 }}>×</button>
                         </div>
                       </div>
                       <div style={{ textAlign: 'center', padding: '0 2px' }}>
-                        <span style={{ fontSize: '11.5px', color: 'oklch(45% 0.02 250)' }}>{i + 1}</span>
+                        <span style={{ fontSize: '11.5px', color: TEXT_MUTED }}>{i + 1}</span>
                       </div>
                     </div>
                   );
                 })}
-                <button onClick={onAddPage} style={{ border: '1.5px dashed oklch(85% 0.01 250)', background: 'none', borderRadius: 8, padding: 14, fontSize: 12, color: 'oklch(50% 0.02 250)', cursor: 'pointer', fontFamily: 'inherit' }}>+ 페이지 추가</button>
+                <button onClick={onAddPage} style={{ border: `1.5px dashed ${BORDER_STRONG}`, background: 'none', borderRadius: 8, padding: 14, fontSize: 12, color: TEXT_SUBTLE, cursor: 'pointer', fontFamily: 'inherit' }}>+ 페이지 추가</button>
               </div>
             </>
           ) : (
@@ -439,13 +527,13 @@ export function EditorScreen(props: EditorScreenProps) {
                   {activePagePending && (
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, background: '#fff' }}>
                       <div style={spinnerAccentStyle(26, 3)} />
-                      <div style={{ fontSize: '12.5px', color: 'oklch(50% 0.02 250)' }}>이 페이지를 여는 중…</div>
+                      <div style={{ fontSize: '12.5px', color: '#7a7a82' }}>이 페이지를 여는 중…</div>
                     </div>
                   )}
                   {activePageTextPending && (
-                    <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid oklch(88% 0.01 250)', borderRadius: 20, padding: '5px 10px', boxShadow: '0 2px 8px rgba(20,30,45,.1)', zIndex: 5 }}>
+                    <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid #ededed', borderRadius: 20, padding: '5px 10px', boxShadow: '0 2px 8px rgba(20,30,45,.1)', zIndex: 5 }}>
                       <div style={spinnerAccentStyle(12, 2)} />
-                      <span style={{ fontSize: 11, color: 'oklch(45% 0.02 250)' }}>텍스트 인식 중…</span>
+                      <span style={{ fontSize: 11, color: '#6b6b72' }}>텍스트 인식 중…</span>
                     </div>
                   )}
                   <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, pointerEvents: 'none', backgroundImage: activePage.pdfImage ? `url(${activePage.pdfImage})` : 'none', backgroundSize: 'contain', backgroundRepeat: 'no-repeat' }} />
@@ -521,15 +609,15 @@ export function EditorScreen(props: EditorScreenProps) {
                         <div
                           contentEditable={isTextEditable} suppressContentEditableWarning
                           onBlur={(e) => docActions.updateBlock(activePageId, b.id, 'name', e.currentTarget.innerHTML)}
-                          style={{ fontSize: gSize ? gSize + 'px' : '13.5px', color: 'oklch(35% 0.02 250)', fontFamily: gFam || undefined }}
+                          style={{ fontSize: gSize ? gSize + 'px' : '13.5px', color: '#4a4a52', fontFamily: gFam || undefined }}
                           dangerouslySetInnerHTML={{ __html: b.name }}
                         />
                       </div>
                       <div data-sig-which={b.which} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'fixed', which: b.which }); }} style={{ width: 170, height: 56, flex: '0 0 170px' }}>
                         {sig.signed ? (
-                          <div style={{ width: '100%', height: '100%', border: '1px solid oklch(55% 0.13 150)', borderRadius: 6, background: sig.dataUrl ? `transparent url(${sig.dataUrl}) no-repeat center / contain` : 'transparent', cursor: 'pointer' }} />
+                          <div style={{ width: '100%', height: '100%', border: '1px solid #16a34a', borderRadius: 6, background: sig.dataUrl ? `transparent url(${sig.dataUrl}) no-repeat center / contain` : 'transparent', cursor: 'pointer' }} />
                         ) : (
-                          <div style={{ width: '100%', height: '100%', border: '1.5px dashed oklch(60% 0.14 250)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',sans-serif", fontSize: '11.5px', color: ACCENT, cursor: 'pointer', background: 'oklch(97% 0.01 250)' }}>클릭하여 서명</div>
+                          <div style={{ width: '100%', height: '100%', border: '1.5px dashed var(--accent, #3d5afe)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',sans-serif", fontSize: '11.5px', color: ACCENT, cursor: 'pointer', background: '#fcfcfd' }}>클릭하여 서명</div>
                         )}
                       </div>
                     </div>
@@ -541,10 +629,10 @@ export function EditorScreen(props: EditorScreenProps) {
               {/* Images */}
               {activePage.images.map((im) => (
                 <div key={im.id} data-page-id={activePageId} data-item-id={im.id} className="pdfe-overlay-item" onMouseDown={pointer.onImageMouseDown} onClick={stopProp} style={{ position: 'absolute', left: im.x, top: im.y, width: im.w, height: im.h, overflow: 'visible', cursor: 'grab' }}>
-                  <div style={{ width: '100%', height: '100%', border: '1px solid oklch(80% 0.01 250)', borderRadius: 4, background: 'repeating-linear-gradient(135deg, oklch(90% 0.01 250) 0 8px, oklch(94% 0.008 250) 8px 16px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',monospace", fontSize: 11, color: 'oklch(45% 0.02 250)', position: 'relative', pointerEvents: 'none' }}>
+                  <div style={{ width: '100%', height: '100%', border: '1px solid #d7d7dd', borderRadius: 4, background: 'repeating-linear-gradient(135deg, #ececec 0 8px, #eef0f3 8px 16px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',monospace", fontSize: 11, color: '#6b6b72', position: 'relative', pointerEvents: 'none' }}>
                     이미지 placeholder
                   </div>
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={im.id} onClick={(e) => { e.stopPropagation(); docActions.deleteImage(activePageId, im.id); showToast('이미지를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 20, height: 20, borderRadius: '50%', background: '#fff', border: '1px solid oklch(80% 0.01 250)', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: 'oklch(45% 0.02 250)', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
+                  {!isExporting && <button data-page-id={activePageId} data-item-id={im.id} onClick={(e) => { e.stopPropagation(); docActions.deleteImage(activePageId, im.id); showToast('이미지를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 20, height: 20, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
                 </div>
               ))}
 
@@ -552,18 +640,18 @@ export function EditorScreen(props: EditorScreenProps) {
               {activePage.signatureFields.map((f) => (
                 <div key={f.id} data-page-id={activePageId} data-item-id={f.id} className="pdfe-overlay-item" onMouseDown={pointer.onSigFieldMouseDown} onClick={stopProp} style={{ position: 'absolute', left: f.x, top: f.y, width: f.w, height: f.h, overflow: 'visible', cursor: 'grab' }}>
                   {f.signed ? (
-                    <div data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'extra', pageId: activePageId, id: f.id }); }} style={{ width: '100%', height: '100%', border: '1px solid oklch(55% 0.13 150)', borderRadius: 6, background: f.dataUrl ? `transparent url(${f.dataUrl}) no-repeat center / contain` : 'transparent', cursor: 'pointer' }} />
+                    <div data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'extra', pageId: activePageId, id: f.id }); }} style={{ width: '100%', height: '100%', border: '1px solid #16a34a', borderRadius: 6, background: f.dataUrl ? `transparent url(${f.dataUrl}) no-repeat center / contain` : 'transparent', cursor: 'pointer' }} />
                   ) : (
-                    <div data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'extra', pageId: activePageId, id: f.id }); }} style={{ width: '100%', height: '100%', border: '1.5px dashed oklch(60% 0.14 250)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',sans-serif", fontSize: '11.5px', color: ACCENT, cursor: 'pointer', background: '#fff' }}>서명 필드 · 클릭</div>
+                    <div data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'extra', pageId: activePageId, id: f.id }); }} style={{ width: '100%', height: '100%', border: '1.5px dashed var(--accent, #3d5afe)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',sans-serif", fontSize: '11.5px', color: ACCENT, cursor: 'pointer', background: '#fff' }}>서명 필드 · 클릭</div>
                   )}
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); docActions.deleteSigField(activePageId, f.id); showToast('서명 필드를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 20, height: 20, borderRadius: '50%', background: '#fff', border: '1px solid oklch(80% 0.01 250)', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: 'oklch(45% 0.02 250)', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
+                  {!isExporting && <button data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); docActions.deleteSigField(activePageId, f.id); showToast('서명 필드를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 20, height: 20, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
                 </div>
               ))}
 
               {/* Shapes */}
               {activePage.shapes.map((sh) => (
-                <div key={sh.id} data-page-id={activePageId} data-item-id={sh.id} className="pdfe-overlay-item" onMouseDown={pointer.onShapeMouseDown} onClick={stopProp} style={{ position: 'absolute', left: sh.x, top: sh.y, width: sh.w, height: sh.h, border: `2px solid ${ACCENT}`, borderRadius: 4, background: 'oklch(55% 0.14 250 / 6%)', cursor: 'grab' }}>
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={sh.id} onClick={(e) => { e.stopPropagation(); docActions.deleteShape(activePageId, sh.id); showToast('도형을 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid oklch(80% 0.01 250)', cursor: 'pointer', fontSize: 11, lineHeight: 1, color: 'oklch(45% 0.02 250)', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
+                <div key={sh.id} data-page-id={activePageId} data-item-id={sh.id} className="pdfe-overlay-item" onMouseDown={pointer.onShapeMouseDown} onClick={stopProp} style={{ position: 'absolute', left: sh.x, top: sh.y, width: sh.w, height: sh.h, border: `2px solid ${ACCENT}`, borderRadius: 4, background: 'color-mix(in srgb, var(--accent) 6%, transparent)', cursor: 'grab' }}>
+                  {!isExporting && <button data-page-id={activePageId} data-item-id={sh.id} onClick={(e) => { e.stopPropagation(); docActions.deleteShape(activePageId, sh.id); showToast('도형을 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 11, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
                 </div>
               ))}
 
@@ -573,20 +661,20 @@ export function EditorScreen(props: EditorScreenProps) {
                   <div
                     contentEditable suppressContentEditableWarning
                     onBlur={(e) => docActions.updateTextBoxText(activePageId, tb.id, e.currentTarget.innerHTML)}
-                    style={{ width: '100%', height: '100%', background: '#fff', border: '1px solid oklch(80% 0.01 250)', borderRadius: 4, padding: '6px 8px', fontFamily: gFam || "'Pretendard',sans-serif", fontSize: (gSize || 13.5) + 'px', lineHeight: 1.5, outline: 'none', overflow: 'auto' }}
+                    style={{ width: '100%', height: '100%', background: '#fff', border: '1px solid #d7d7dd', borderRadius: 4, padding: '6px 8px', fontFamily: gFam || "'Pretendard',sans-serif", fontSize: (gSize || 13.5) + 'px', lineHeight: 1.5, outline: 'none', overflow: 'auto' }}
                     dangerouslySetInnerHTML={{ __html: tb.text }}
                   />
                   {!isExporting && (
-                    <button data-page-id={activePageId} data-item-id={tb.id} onMouseDown={pointer.onTextBoxMouseDown} title="이동" className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, left: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid oklch(80% 0.01 250)', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.15)', padding: 0 }}>
+                    <button data-page-id={activePageId} data-item-id={tb.id} onMouseDown={pointer.onTextBoxMouseDown} title="이동" className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, left: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.15)', padding: 0 }}>
                       <div style={{ width: 8, height: 8, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: 'oklch(50% 0.02 250)' }} />
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: 'oklch(50% 0.02 250)' }} />
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: 'oklch(50% 0.02 250)' }} />
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: 'oklch(50% 0.02 250)' }} />
+                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
+                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
+                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
+                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
                       </div>
                     </button>
                   )}
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={tb.id} onClick={(e) => { e.stopPropagation(); docActions.deleteTextBox(activePageId, tb.id); showToast('텍스트 박스를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid oklch(80% 0.01 250)', cursor: 'pointer', fontSize: 11, lineHeight: 1, color: 'oklch(45% 0.02 250)', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
+                  {!isExporting && <button data-page-id={activePageId} data-item-id={tb.id} onClick={(e) => { e.stopPropagation(); docActions.deleteTextBox(activePageId, tb.id); showToast('텍스트 박스를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 11, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
                 </div>
               ))}
 
@@ -596,17 +684,17 @@ export function EditorScreen(props: EditorScreenProps) {
       </div>
 
       {/* Bottom nav bar */}
-      <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#fff', border: `1px solid oklch(88% 0.01 250)`, borderRadius: 12, boxShadow: '0 8px 28px rgba(20,30,45,.16)', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', zIndex: 30, fontFamily: "'Pretendard',sans-serif" }}>
-        <button onClick={prevPage} disabled={activeIndex <= 0} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: 'oklch(35% 0.02 250)' }}>‹</button>
-        <input value={pageNumInput} onChange={onPageNumChange} onBlur={onPageNumCommit} onKeyDown={onPageNumKeyDown} style={{ width: 34, height: 28, textAlign: 'center', border: '1px solid oklch(88% 0.01 250)', borderRadius: 6, fontSize: '12.5px', fontFamily: 'inherit' }} />
-        <span style={{ fontSize: 12, color: 'oklch(50% 0.02 250)', padding: '0 2px', whiteSpace: 'nowrap' }}>/ {pages.length}</span>
-        <button onClick={nextPage} disabled={activeIndex >= pages.length - 1} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: 'oklch(35% 0.02 250)' }}>›</button>
-        <div style={{ width: 1, height: 20, background: 'oklch(88% 0.01 250)', margin: '0 4px' }} />
-        <button onClick={zoomOut} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 15, color: 'oklch(35% 0.02 250)' }}>−</button>
-        <span style={{ fontSize: 12, color: 'oklch(45% 0.02 250)', width: 42, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button onClick={zoomIn} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 15, color: 'oklch(35% 0.02 250)' }}>+</button>
-        <div style={{ width: 1, height: 20, background: 'oklch(88% 0.01 250)', margin: '0 4px' }} />
-        <button onClick={fitToWidth} title="폭 맞춤" style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: 'oklch(35% 0.02 250)' }}>⇔</button>
+      <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, boxShadow: '0 8px 28px rgba(20,30,45,.16)', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', zIndex: 30, fontFamily: "'Pretendard',sans-serif" }}>
+        <button onClick={prevPage} disabled={activeIndex <= 0} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 16, color: TEXT_MUTED }}>‹</button>
+        <input value={pageNumInput} onChange={onPageNumChange} onBlur={onPageNumCommit} onKeyDown={onPageNumKeyDown} style={{ width: 34, height: 28, textAlign: 'center', border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: '12.5px', fontFamily: 'inherit', background: 'transparent', color: 'inherit' }} />
+        <span style={{ fontSize: 12, color: TEXT_SUBTLE, padding: '0 2px', whiteSpace: 'nowrap' }}>/ {pages.length}</span>
+        <button onClick={nextPage} disabled={activeIndex >= pages.length - 1} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 16, color: TEXT_MUTED }}>›</button>
+        <div style={{ width: 1, height: 20, background: BORDER_SOFT, margin: '0 4px' }} />
+        <button onClick={zoomOut} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15, color: TEXT_MUTED }}>−</button>
+        <span style={{ fontSize: 12, color: TEXT_MUTED, width: 42, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+        <button onClick={zoomIn} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15, color: TEXT_MUTED }}>+</button>
+        <div style={{ width: 1, height: 20, background: BORDER_SOFT, margin: '0 4px' }} />
+        <button onClick={fitToWidth} title="폭 맞춤" style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, color: TEXT_MUTED }}>⇔</button>
       </div>
     </div>
   );

@@ -1,6 +1,52 @@
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
-body { margin: 0; }
+/* Scoped under .pdf-editor-root so we do not pollute the host app. */
+
+.pdf-editor-root,
+.pdf-editor-root * {
+  box-sizing: border-box;
+}
+
+.pdf-editor-root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+  position: relative;
+  font-family: 'Pretendard', system-ui, sans-serif;
+  /* 색 역할 토큰 — 라이트 기본값. --pdfe-page 는 문서 종이라 다크에서도 흰색 유지. */
+  --pdfe-page: #fff;
+  --pdfe-bg: #ffffff;
+  --pdfe-surface: #ffffff;
+  --pdfe-surface-soft: #f7f7f8;
+  --pdfe-canvas: #f5f5f7;
+  --pdfe-border: #ececec;
+  --pdfe-border-soft: #f0f0f0;
+  --pdfe-border-strong: #e2e2e6;
+  --pdfe-text: #17171a;
+  --pdfe-text-muted: #6b6b72;
+  --pdfe-text-subtle: #9a9aa2;
+  --pdfe-text-faint: #c0c0c6;
+  --pdfe-scrollbar: rgba(20, 30, 45, .16);
+  --pdfe-toast-bg: #17171a;
+  background: var(--pdfe-bg);
+  color: var(--pdfe-text);
+}
+
+/* 다크: 크롬만 어둡게. 종이(--pdfe-page)는 그대로 흰색. */
+html[data-theme="dark"] .pdf-editor-root {
+  --pdfe-bg: #1c1d1f;
+  --pdfe-surface: #1c1d1f;
+  --pdfe-surface-soft: rgba(255, 255, 255, .05);
+  --pdfe-canvas: #131314;
+  --pdfe-border: rgba(255, 255, 255, .12);
+  --pdfe-border-soft: rgba(255, 255, 255, .08);
+  --pdfe-border-strong: rgba(255, 255, 255, .22);
+  --pdfe-text: #ececee;
+  --pdfe-text-muted: #b3b7c2;
+  --pdfe-text-subtle: #8b95a6;
+  --pdfe-text-faint: #5c626c;
+  --pdfe-scrollbar: rgba(255, 255, 255, .2);
+  --pdfe-toast-bg: #3a3c42;
+}
 
 @font-face {
   font-family: 'FreeMono';
@@ -17,20 +63,76 @@ body { margin: 0; }
   font-display: swap;
 }
 
-::selection { background: #FDE68A; }
+.pdf-editor-root ::selection {
+  background: #FDE68A;
+}
 
-@keyframes pdfe-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-@keyframes pdfe-spin { to { transform: rotate(360deg); } }
-@keyframes pdfe-toast-in { from { transform: translate(-50%, 12px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
-@keyframes pdfe-pop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes pdfe-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+@keyframes pdfe-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pdfe-toast-in {
+  from { transform: translate(-50%, 12px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+@keyframes pdfe-pop {
+  from { transform: scale(.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
 
-[contenteditable="true"]:focus { outline: 2px solid #2563a8; outline-offset: 3px; border-radius: 3px; }
+.pdf-editor-root [contenteditable="true"]:focus {
+  outline: 2px solid #2563a8;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
 
-.pdfe-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
-.pdfe-scroll::-webkit-scrollbar-thumb { background: rgba(20, 30, 45, .16); border-radius: 6px; }
-.pdfe-scroll::-webkit-scrollbar-track { background: transparent; }
+.pdf-editor-root .pdfe-scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.pdf-editor-root .pdfe-scroll::-webkit-scrollbar-thumb {
+  background: var(--pdfe-scrollbar);
+  border-radius: 6px;
+}
+.pdf-editor-root .pdfe-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
 
-/* Move/delete controls on canvas overlay items (images, shapes, text boxes, signature fields)
-   stay hidden until the item is hovered, so the page isn't cluttered with buttons. */
-.pdfe-overlay-item .pdfe-overlay-btn { opacity: 0; pointer-events: none; transition: opacity .12s; }
-.pdfe-overlay-item:hover .pdfe-overlay-btn { opacity: 1; pointer-events: auto; }
+/* Persistent top title bar classes */
+.pdf-editor-root .pdfe-brand:hover {
+  opacity: .7;
+}
+.pdf-editor-root .pdfe-navlink {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pdfe-text-faint);
+  letter-spacing: -.2px;
+  padding: 6px 0;
+  background: none;
+  line-height: 1.2;
+  transition: color .12s;
+  border: none;
+  cursor: pointer;
+  font-family: 'Pretendard', system-ui, sans-serif;
+}
+.pdf-editor-root .pdfe-navlink:hover {
+  color: var(--pdfe-text);
+}
+.pdf-editor-root .pdfe-navlink-active {
+  color: var(--pdfe-text);
+  font-weight: 700;
+}
+
+/* Move/delete controls on canvas overlay items stay hidden until hover. */
+.pdf-editor-root .pdfe-overlay-item .pdfe-overlay-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s;
+}
+.pdf-editor-root .pdfe-overlay-item:hover .pdfe-overlay-btn {
+  opacity: 1;
+  pointer-events: auto;
+}

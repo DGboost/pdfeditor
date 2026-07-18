@@ -55,6 +55,7 @@ type Action =
   | { type: 'UPDATE_BLOCK'; pageId: string; blockId: string; field: EditableBlockField; html: string }
   | { type: 'UPDATE_TEXT_BOX_TEXT'; pageId: string; id: string; html: string }
   | { type: 'PUSH_HISTORY' }
+  | { type: 'RESTORE_STATE'; state: any }
   | { type: 'UNDO' }
   | { type: 'REDO' };
 
@@ -198,6 +199,8 @@ function reducer(state: DocumentState, action: Action): DocumentState {
   switch (action.type) {
     case 'LOAD_DOCUMENT':
       return { ...state, pages: action.pages, history: { undo: [], redo: [] } };
+    case 'RESTORE_STATE':
+      return { ...action.state };
     case 'PATCH_PAGE':
       return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, ...action.patch }) as Page) };
     case 'REPLACE_PAGE':
@@ -269,6 +272,7 @@ export function useDocumentReducer(initialPages: Page[]) {
     updateTextItem: (pageId: string, itemId: string, html: string) => dispatch({ type: 'UPDATE_TEXT_ITEM', pageId, itemId, html }),
     updateBlock: (pageId: string, blockId: string, field: EditableBlockField, html: string) => dispatch({ type: 'UPDATE_BLOCK', pageId, blockId, field, html }),
     updateTextBoxText: (pageId: string, id: string, html: string) => dispatch({ type: 'UPDATE_TEXT_BOX_TEXT', pageId, id, html }),
+    restoreState: (state: any) => dispatch({ type: 'RESTORE_STATE', state }),
     pushHistory: () => dispatch({ type: 'PUSH_HISTORY' }),
     undo: () => dispatch({ type: 'UNDO' }),
     redo: () => dispatch({ type: 'REDO' }),
