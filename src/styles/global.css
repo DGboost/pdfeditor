@@ -117,16 +117,22 @@
 .pdf-editor-root .pdfe-bottom-nav { font-size: 14px; }
 .pdf-editor-root .pdfe-selection-row { flex-wrap: wrap; }
 .pdf-editor-root .text-edit-panel button[aria-pressed="true"] { color: #fff; border-color: var(--accent); background: var(--pdfe-button-bg, var(--accent)); }
-.pdf-editor-root .text-edit-panel { width: 380px; max-width: calc(100vw - 40px); flex: 0 0 380px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 20px; border: 1px solid var(--pdfe-border-soft); border-radius: 24px; background: var(--pdfe-surface); font-size: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.12); margin: 20px; }
+.pdf-editor-root .text-edit-panel { width: var(--pdfe-edit-panel-width, 380px); max-width: calc(100% - 12px); flex: 0 1 var(--pdfe-edit-panel-width, 380px); min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 20px; background: var(--pdfe-surface); font-size: 14px; }
+.pdf-editor-root .pdfe-edit-panel-resizer { position: relative; z-index: 36; width: 12px; flex: 0 0 12px; cursor: col-resize; touch-action: none; user-select: none; background: var(--pdfe-surface); }
+.pdf-editor-root .pdfe-edit-panel-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: var(--pdfe-border); }
+.pdf-editor-root .pdfe-edit-panel-resizer:hover::after,
+.pdf-editor-root .pdfe-edit-panel-resizer:focus-visible::after { background: var(--accent); }
+.pdf-editor-root .pdfe-edit-panel-resizer:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pdf-editor-root .text-edit-panel-heading,
-.pdf-editor-root .text-edit-panel-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pdf-editor-root .text-edit-panel-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
 .pdf-editor-root .text-edit-panel-heading,
 .pdf-editor-root .text-edit-panel-actions { flex-shrink: 0; }
 .pdf-editor-root .text-edit-panel-heading { margin-bottom: 20px; }
-.pdf-editor-root .text-edit-panel-actions { margin-top: 20px; }
-.pdf-editor-root .text-edit-panel-body { flex: 1; min-height: 0; overflow-y: auto; overflow-wrap: anywhere; }
-.pdf-editor-root .text-edit-panel textarea { width: 100%; min-height: 130px; resize: vertical; margin-bottom: 20px; padding: 6px 12px; background: var(--pdfe-surface); color: var(--pdfe-text); border: 1px solid var(--pdfe-border); border-radius: 8px; font: inherit; font-size: 15px; line-height: 1.625; }
-.pdf-editor-root .text-edit-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0; font-size: 13px; }
+.pdf-editor-root .text-edit-panel-heading button { flex-shrink: 0; }
+.pdf-editor-root .text-edit-panel-actions { margin-top: 20px; flex-wrap: wrap; }
+.pdf-editor-root .text-edit-panel-body { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-wrap: anywhere; }
+.pdf-editor-root .text-edit-panel textarea { width: 100%; max-width: 100%; min-width: 0; min-height: 130px; resize: vertical; margin-bottom: 20px; padding: 6px 12px; background: var(--pdfe-surface); color: var(--pdfe-text); border: 1px solid var(--pdfe-border); border-radius: 8px; font: inherit; font-size: 15px; line-height: 1.625; }
+.pdf-editor-root .text-edit-panel label { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 12px 0; font-size: 13px; }
 .pdf-editor-root .text-edit-panel input:not([type="color"]) { width: 85px; }
 .pdf-editor-root .text-edit-panel fieldset { min-width: 0; border: 1px solid var(--pdfe-border); margin: 20px 0; border-radius: 8px; }
 @media (pointer: coarse) {
@@ -135,6 +141,7 @@
 
 .pdf-editor-root :is(button, input, select, textarea) { font-family: inherit; }
 .pdf-editor-root button { cursor: pointer; background: var(--pdfe-button-bg, var(--pdfe-surface)); }
+.pdf-editor-root button:not(.pdfe-text-hit):not(.pdfe-thumb-hit):not(.pdfe-upload-target) { border-radius: 9999px; }
 /* Hover variables also drive inline chrome styles without overriding their resting state. */
 .pdf-editor-root button,
 .pdf-editor-root .pdfe-upload-target { transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease, outline-color 180ms ease; }
@@ -155,7 +162,7 @@
 .pdf-editor-root .pdfe-panel-enter { animation: pdfe-pop 180ms ease-out; }
 .pdf-editor-root .text-edit-panel-heading strong { font-size: 17px; font-weight: 500; letter-spacing: -.025em; }
 .pdf-editor-root :is(h2, h3) { letter-spacing: -.025em; }
-.pdf-editor-root .text-edit-panel select { max-width: 220px; min-width: 0; text-overflow: ellipsis; }
+.pdf-editor-root .text-edit-panel select { max-width: min(220px, 100%); min-width: 0; text-overflow: ellipsis; }
 .pdf-editor-root .text-edit-panel-actions button:first-child { background: var(--pdfe-button-bg, var(--accent)); color: white; border-color: var(--accent); }
 .pdf-editor-root .pdfe-bottom-nav { white-space: nowrap; }
 .pdf-editor-root .pdfe-bottom-nav button,
@@ -171,6 +178,7 @@
   .pdf-editor-root .pdfe-editor-header { height: auto; flex-basis: auto; flex-wrap: wrap; padding: 12px 20px; gap: 8px; }
   .pdf-editor-root .pdfe-filename { order: 1; flex: 1 0 100%; }
   .pdf-editor-root .text-edit-panel { position: absolute; inset: 0 0 0 auto; }
+  .pdf-editor-root .pdfe-edit-panel-resizer { position: absolute; top: 0; bottom: 0; right: min(var(--pdfe-edit-panel-width, 380px), 100% - 12px); }
 }
 .pdf-editor-root .pdfe-segmented { display: flex; padding: 4px; gap: 4px; border-radius: 9999px; background: var(--pdfe-selected); }
 @media (prefers-reduced-motion: reduce) {

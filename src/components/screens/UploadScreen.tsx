@@ -20,7 +20,7 @@ export interface UploadScreenProps {
   onDeleteRetained: (id: number) => void;
 }
 
-const libraryButtonStyle = outlineAccentBtn({ border: `1px solid ${BORDER}`, color: TEXT, padding: '6px 12px', fontSize: 14, fontWeight: 400, borderRadius: 8 });
+const libraryButtonStyle = outlineAccentBtn({ border: `1px solid ${BORDER}`, color: TEXT, padding: '6px 12px', fontSize: 14, fontWeight: 400 });
 
 export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, uploadError, onDragOverChange, onFile, archives, retainedDrafts, onOpenArchive, onDeleteArchive, onDownloadRetained, onDeleteRetained }: UploadScreenProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);

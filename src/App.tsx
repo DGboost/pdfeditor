@@ -318,7 +318,7 @@ export default function App() {
     <div className="pdf-editor-root" style={{ display: 'flex', flexDirection: 'column' }}>
       {screen === 'upload' && <header style={{ height: 60, flex: 'none', background: SURFACE, borderBottom: `1px solid ${BORDER_SOFT}`, display: 'flex', alignItems: 'center', gap: 12, padding: '0 20px' }}>
         <span className="pdfe-brand" style={{ fontSize: 17, fontWeight: 500, color: TEXT, whiteSpace: 'nowrap' }}>PDF 편집</span>
-        {workspace && <button style={{ marginLeft: 'auto', minHeight: 32, border: `1px solid ${BORDER_STRONG}`, background: 'var(--pdfe-button-bg, var(--pdfe-surface))', color: TEXT, borderRadius: 999, padding: '6px 12px', fontSize: 13 }} disabled={busy} onClick={() => setScreen('editor')}>편집기로 돌아가기</button>}
+        {workspace && <button style={{ marginLeft: 'auto', minHeight: 32, border: `1px solid ${BORDER_STRONG}`, background: 'var(--pdfe-button-bg, var(--pdfe-surface))', color: TEXT, padding: '6px 12px', fontSize: 13 }} disabled={busy} onClick={() => setScreen('editor')}>편집기로 돌아가기</button>}
       </header>}
       <main style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         {screen === 'upload' && <UploadScreen fileName={workspace?.fileName ?? ''} dragOver={dragOver} uploading={uploading}
@@ -354,7 +354,7 @@ export default function App() {
           {uploadError && <p role="alert" style={{ color: DANGER, fontSize: 13 }}>{uploadError}</p>}
           </div>
           <div style={{ display: 'flex', flexShrink: 0, gap: 10 }}>
-            <button disabled={busy} onClick={() => setDraftToRestore(null)} style={{ flex: 1, border: `1px solid ${BORDER_STRONG}`, background: 'var(--pdfe-button-bg, var(--pdfe-surface))', borderRadius: 8, padding: 10 }}>나중에</button>
+            <button disabled={busy} onClick={() => setDraftToRestore(null)} style={{ flex: 1, border: `1px solid ${BORDER_STRONG}`, background: 'var(--pdfe-button-bg, var(--pdfe-surface))', padding: 10 }}>나중에</button>
             <button className="pdfe-primary-button" disabled={busy} onClick={() => void restoreDraft(draftToRestore, true)} style={solidAccentBtn({ flex: 1, padding: 10 })}>이어서 작업</button>
           </div>
         </div>

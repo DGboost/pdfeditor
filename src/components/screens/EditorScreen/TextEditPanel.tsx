@@ -21,11 +21,11 @@ export interface TextEditPanelProps {
   onCommit: (content: TextContent, widthPt: number, fontAssets: DownloadedFontAsset[]) => void;
   onCancel: () => void;
   onPreview: (page: Page | null, candidateRevision: number) => void;
+  previewError?: { message: string; candidateRevision?: number };
   onDirtyChange: (dirty: boolean) => void;
   registerController: (controller: EditController | null) => void;
   showToast: (message: string) => void;
   disabled?: boolean;
-  requiresCommit?: boolean;
 }
 interface Draft { content: TextContent; width: string; size: string; selection: TextSelection }
 interface CapturedInput { draft: Draft; anchor: InputAnchor }
@@ -66,7 +66,7 @@ export function TextEditPanel(props: TextEditPanelProps) {
   const initialRevision = useRef(props.baseRevision);
   const targetKey = `source:${JSON.stringify(props.target.lineIds)}`;
   const identity = useRef(`${props.page.id}:${targetKey}`);
-  const dirty = !!props.requiresCommit || JSON.stringify(draft.content) !== JSON.stringify(original.current.content) || Number(draft.width) !== original.current.width || draft.size !== String(styleAt(draft.content.runs, draft.selection.start).sizePt);
+  const dirty = JSON.stringify(draft.content) !== JSON.stringify(original.current.content) || Number(draft.width) !== original.current.width || draft.size !== String(styleAt(draft.content.runs, draft.selection.start).sizePt);
 
   function change(next: Draft, record = true, compositionInput = false) {
     if (!active.current || lockedRef.current || ((current.current.disabled || waitingForCompositionRef.current) && !compositionInput)) return;
@@ -127,10 +127,10 @@ export function TextEditPanel(props: TextEditPanelProps) {
       const capturedGeneration = generation.current;
       const capturedIdentity = identity.current;
       if (current.current.getRevision() !== revision) return false;
-      if (!current.current.requiresCommit && JSON.stringify(snapshot.content) === JSON.stringify(initialDraft.current.content)
+      if (JSON.stringify(snapshot.content) === JSON.stringify(initialDraft.current.content)
         && snapshot.width === initialDraft.current.width && snapshot.size === initialDraft.current.size) { cancel(); return true; }
       if (!validInput(snapshot)) return false;
-      if (!current.current.requiresCommit && JSON.stringify(snapshot.content) === JSON.stringify(original.current.content) && Number(snapshot.width) === original.current.width) { cancel(); return true; }
+      if (JSON.stringify(snapshot.content) === JSON.stringify(original.current.content) && Number(snapshot.width) === original.current.width) { cancel(); return true; }
       setBusy(true);
       const payload = candidate(snapshot);
       const result = await current.current.validate(payload, revision, capturedGeneration);
@@ -296,30 +296,14 @@ export function TextEditPanel(props: TextEditPanelProps) {
   // An already-open IME session must deliver its final input before flush locks it.
   const textareaUnavailable = locked || !!downloading || !props.target.editable || ((waitingForComposition || props.disabled) && !composing.current);
   const grouped = props.target.lineIds.length > 1;
-  return <section className="text-edit-panel pdfe-panel-enter" aria-label={grouped ? '묶은 텍스트 편집' : '텍스트 편집'} onKeyDown={event => {
+  const displayedError = error || (props.previewError?.candidateRevision === generation.current ? props.previewError.message : null);
+  return <section className="text-edit-panel" aria-label={grouped ? '묶은 텍스트 편집' : '텍스트 편집'} onKeyDown={event => {
     if (event.key === 'Escape') { if (composing.current) event.stopPropagation(); else event.preventDefault(); }
   }}>
     <div className="text-edit-panel-heading"><strong>{grouped ? '묶은 텍스트 편집' : '텍스트 편집'}</strong><button className="pdfe-icon-button" type="button" onClick={cancel} aria-label="텍스트 편집 닫기"><X size={24} strokeWidth={1.5} /></button></div>
     <div className="text-edit-panel-body pdfe-scroll">
-    {grouped && <p role="note">선택한 {props.target.lineIds.length}개 원본 줄을 하나로 묶어 편집합니다. Enter로 명시적인 줄바꿈을 넣을 수 있습니다.</p>}
     {!props.target.editable && <p role="alert">{props.target.reason}</p>}
-    {sourceChoices.length > 0 && <div aria-label="원본 글꼴 정보">
-      {sourceChoices.map(source => {
-        const info = sourceDetails.get(fontValue(source));
-        const matching = draft.content.runs.some(run => run.style.font.kind === 'source' && fontValue(run.style.font) === fontValue(source));
-        return <div key={fontValue(source)} style={{ marginBottom: 10 }}>
-          <strong>{info?.declaredName || '이름을 확인할 수 없는 원본 글꼴'}</strong>
-          {info?.family && <div>{info.family} · 굵기 {info.weight} · {info.italic ? 'Italic' : '직립체'}</div>}
-          <div>{info?.embedded === true ? 'PDF에 포함된 글꼴입니다. 일부 문자만 포함되어 있을 수 있습니다.' : info?.embedded === false ? 'PDF에 원본 글꼴이 포함되어 있지 않습니다.' : '원본 글꼴의 PDF 포함 여부를 확인할 수 없습니다.'}</div>
-          {info?.catalogId ? <><div>같은 이름·스타일의 공개 라이선스 글꼴을 사용할 수 있습니다. 필요한 글꼴·라이선스만 GitHub에서 가져오며 PDF는 전송하지 않습니다.</div>
-            <button type="button" disabled={unavailable || composing.current || !matching} onClick={() => void download(source)}>
-              {downloading === fontValue(source) ? '다운로드 중…' : matching ? '다운로드해서 적용' : '초안에서 다른 글꼴 사용 중'}
-            </button></> : <div>{info?.unavailableReason || '일치하는 다운로드 글꼴을 찾을 수 없습니다.'}</div>}
-        </div>;
-      })}
-      <p role="note">다운로드한 글꼴은 이 편집 초안의 같은 원본 글꼴에만 적용합니다. 아래 ‘적용’으로 확정하며 ‘취소’하면 문서는 바뀌지 않습니다. 원본과 제작 버전·글자 폭이 다를 수 있습니다.</p>
-    </div>}
-    {downloadedChoices.length > 0 && <p role="status">다운로드 글꼴: {downloadedChoices.map(id => assets.find(asset => asset.id === id)?.postScriptName || '저장된 글꼴').join(', ')}</p>}
+    {displayedError && <p role="alert">{displayedError}</p>}
     <textarea ref={textarea} aria-label="텍스트 내용" value={plainText(draft.content)} disabled={textareaUnavailable}
       onChange={updateText} onKeyDown={keyDown}
       onSelect={event => {
@@ -344,6 +328,7 @@ export function TextEditPanel(props: TextEditPanelProps) {
         pendingSelection.current = { start: offset, end: offset };
         change({ ...live.current, content: { ...live.current.content, runs }, selection: pendingSelection.current });
       }} />
+    {grouped && <p role="note">선택한 {props.target.lineIds.length}개 원본 줄을 하나로 묶어 편집합니다. Enter로 명시적인 줄바꿈을 넣을 수 있습니다.</p>}
     <fieldset disabled={unavailable || composing.current}>
       <legend>PDF 텍스트 서식</legend>
       <label>글꼴 <select aria-label="글꼴" value={fontValue(font)} onChange={event => {
@@ -376,13 +361,29 @@ export function TextEditPanel(props: TextEditPanelProps) {
       }}><option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option></select></label>
       <label>폭 (pt) <input aria-label="텍스트 폭 (pt)" inputMode="decimal" value={draft.width} onChange={event => change({ ...live.current, width: event.target.value })} /></label>
     </fieldset>
-    {error && <p role="alert">{error}</p>}
     {proposal && <button type="button" disabled={unavailable} onClick={() => {
       if (proposalWholeTarget.current) {
         const snapshot = live.current;
         change({ ...snapshot, content: { ...snapshot.content, runs: applyRunStyle(snapshot.content.runs, 0, plainText(snapshot.content).length, { font: proposal }) } });
       } else format({ font: proposal });
     }}>대체 글꼴 사용 동의</button>}
+    {sourceChoices.length > 0 && <div aria-label="원본 글꼴 정보">
+      {sourceChoices.map(source => {
+        const info = sourceDetails.get(fontValue(source));
+        const matching = draft.content.runs.some(run => run.style.font.kind === 'source' && fontValue(run.style.font) === fontValue(source));
+        return <div key={fontValue(source)} style={{ marginBottom: 10 }}>
+          <strong>{info?.declaredName || '이름을 확인할 수 없는 원본 글꼴'}</strong>
+          {info?.family && <div>{info.family} · 굵기 {info.weight} · {info.italic ? 'Italic' : '직립체'}</div>}
+          <div>{info?.embedded === true ? 'PDF에 포함된 글꼴입니다. 일부 문자만 포함되어 있을 수 있습니다.' : info?.embedded === false ? 'PDF에 원본 글꼴이 포함되어 있지 않습니다.' : '원본 글꼴의 PDF 포함 여부를 확인할 수 없습니다.'}</div>
+          {info?.catalogId ? <><div>같은 이름·스타일의 공개 라이선스 글꼴을 사용할 수 있습니다. 필요한 글꼴·라이선스만 GitHub에서 가져오며 PDF는 전송하지 않습니다.</div>
+            <button type="button" disabled={unavailable || composing.current || !matching} onClick={() => void download(source)}>
+              {downloading === fontValue(source) ? '다운로드 중…' : matching ? '다운로드해서 적용' : '초안에서 다른 글꼴 사용 중'}
+            </button></> : <div>{info?.unavailableReason || '일치하는 다운로드 글꼴을 찾을 수 없습니다.'}</div>}
+        </div>;
+      })}
+      <p role="note">다운로드한 글꼴은 이 편집 초안의 같은 원본 글꼴에만 적용합니다. 아래 ‘적용’으로 확정하며 ‘취소’하면 문서는 바뀌지 않습니다. 원본과 제작 버전·글자 폭이 다를 수 있습니다.</p>
+    </div>}
+    {downloadedChoices.length > 0 && <p role="status">다운로드 글꼴: {downloadedChoices.map(id => assets.find(asset => asset.id === id)?.postScriptName || '저장된 글꼴').join(', ')}</p>}
     </div>
     <div className="text-edit-panel-actions"><button type="button" disabled={unavailable || composing.current} onClick={() => void apply(false)}>{busy ? '검증 중…' : '적용'}</button><button type="button" onClick={cancel}>취소</button></div>
   </section>;

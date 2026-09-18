@@ -20,7 +20,7 @@ export function ExportModal({ open, exportSettings, setExportSettings, isExporti
   const isPdf = exportSettings.format === 'pdf';
 
   const onAction = () => { if (!isExporting) { if (isPdf) onDownload(); else onSaveToArchive(); } };
-  const actionBtnStyle: React.CSSProperties = { ...solidAccentBtn({ padding: 12, fontSize: 14, borderRadius: 8 }), width: '100%', opacity: isExporting ? .5 : 1, cursor: isExporting ? 'not-allowed' : 'pointer' };
+  const actionBtnStyle: React.CSSProperties = { ...solidAccentBtn({ padding: 12, fontSize: 14 }), width: '100%', opacity: isExporting ? .5 : 1, cursor: isExporting ? 'not-allowed' : 'pointer' };
   const actionLabel = isExporting ? (isPdf ? '내보내는 중…' : '저장 중…') : (isPdf ? 'PDF 다운로드' : '보관함에 저장');
 
   return (

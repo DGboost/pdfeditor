@@ -34,7 +34,7 @@ export const TOPBAR_H = 60;
 export const FONT_STACK = "system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
 
 export function solidAccentBtn(extra?: CSSProperties): CSSProperties {
-  return { background: `var(--pdfe-button-bg, ${ACCENT})`, color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontFamily: FONT_STACK, fontSize: 14, fontWeight: 500, ...extra };
+  return { background: `var(--pdfe-button-bg, ${ACCENT})`, color: '#fff', border: 'none', borderRadius: '9999px', cursor: 'pointer', fontFamily: FONT_STACK, fontSize: 14, fontWeight: 500, ...extra };
 }
 
 export function outlineAccentBtn(extra?: CSSProperties): CSSProperties {
