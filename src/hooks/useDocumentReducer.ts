@@ -1,284 +1,221 @@
-import { useMemo, useReducer } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type {
-  Page, Signatures, DocumentSnapshot, SigModalTarget, PartyWhich, DragKind,
+  BlankPage, DocumentSnapshot, DocumentState, DownloadedFontAsset, Page, QuarterTurn,
+  SourceTextEdit, Workspace,
 } from '../types/pdfEditor';
+import { validateFontAssets } from '../utils/db';
 
-export type EditableBlockField = 'text' | 'label' | 'name';
-
-interface HistoryState { undo: DocumentSnapshot[]; redo: DocumentSnapshot[] }
-
-export interface DocumentState {
-  pages: Page[];
-  signatures: Signatures;
-  globalFontFamily: string | null;
-  globalFontSize: number | null;
-  history: HistoryState;
-}
-
-export const initialSignatures: Signatures = {
-  gap: { signed: false, dataUrl: null },
-  eul: { signed: false, dataUrl: null },
+export const initialDocumentState: DocumentState = {
+  workspace: null, revision: 0, history: { undo: [], redo: [] },
 };
 
-function makeInitialState(pages: Page[]): DocumentState {
-  return {
-    pages,
-    signatures: initialSignatures,
-    globalFontFamily: null,
-    globalFontSize: null,
-    history: { undo: [], redo: [] },
-  };
-}
-
-type Action =
-  | { type: 'LOAD_DOCUMENT'; pages: Page[] }
-  | { type: 'PATCH_PAGE'; pageId: string; patch: Partial<Page> }
-  | { type: 'REPLACE_PAGE'; pageId: string; page: Page }
-  | { type: 'ADD_IMAGE'; pageId: string; id: string; x: number; y: number }
-  | { type: 'DELETE_IMAGE'; pageId: string; id: string }
-  | { type: 'ADD_SIG_FIELD'; pageId: string; id: string; x: number; y: number }
-  | { type: 'DELETE_SIG_FIELD'; pageId: string; id: string }
-  | { type: 'SAVE_SIGNATURE'; target: SigModalTarget; dataUrl: string }
-  | { type: 'ADD_TEXTBOX'; pageId: string; id: string; x: number; y: number }
-  | { type: 'DELETE_TEXTBOX'; pageId: string; id: string }
-  | { type: 'ADD_SHAPE'; pageId: string; id: string; x: number; y: number }
-  | { type: 'DELETE_SHAPE'; pageId: string; id: string }
-  | { type: 'MOVE_ITEM'; pageId: string; kind: DragKind; id: string; dx: number; dy: number }
+export type DocumentAction =
+  | { type: 'LOAD_DOCUMENT'; workspace: Workspace }
+  | { type: 'RESTORE_STATE'; workspace: Workspace; restoredRevision?: number }
+  | { type: 'SET_ACTIVE_PAGE'; id: string }
+  | { type: 'SET_FILE_NAME'; name: string }
+  | { type: 'UPSERT_TEXT_EDIT'; pageId: string; edit: SourceTextEdit; fontAssets?: DownloadedFontAsset[] }
+  | { type: 'REMOVE_TEXT_EDIT'; pageId: string; lineId: string }
   | { type: 'DUPLICATE_PAGE'; id: string; newId: string }
   | { type: 'ROTATE_PAGE'; id: string; delta: number }
   | { type: 'DELETE_PAGE'; id: string }
-  | { type: 'ADD_PAGE'; id: string }
+  | { type: 'ADD_PAGE'; page: BlankPage }
   | { type: 'REORDER_PAGES'; fromId: string; toId: string }
-  | { type: 'APPLY_GLOBAL_FONT'; family: string; size: number }
-  | { type: 'RESET_GLOBAL_FONT' }
-  | { type: 'UPDATE_TEXT_ITEM'; pageId: string; itemId: string; html: string }
-  | { type: 'UPDATE_BLOCK'; pageId: string; blockId: string; field: EditableBlockField; html: string }
-  | { type: 'UPDATE_TEXT_BOX_TEXT'; pageId: string; id: string; html: string }
-  | { type: 'PUSH_HISTORY' }
-  | { type: 'RESTORE_STATE'; state: any }
   | { type: 'UNDO' }
   | { type: 'REDO' };
 
-// MOVE_ITEM is intentionally excluded: a drag fires it continuously (once per mousemove tick),
-// so history is pushed once up front via an explicit PUSH_HISTORY at drag-start instead — matching
-// the original prototype's startDrag()-calls-pushHistory-once-then-setState-repeatedly behavior.
-const HISTORY_TRACKED = new Set<Action['type']>([
-  'ADD_IMAGE', 'DELETE_IMAGE', 'ADD_SIG_FIELD', 'DELETE_SIG_FIELD', 'SAVE_SIGNATURE',
-  'ADD_TEXTBOX', 'DELETE_TEXTBOX', 'ADD_SHAPE', 'DELETE_SHAPE',
-  'DUPLICATE_PAGE', 'ROTATE_PAGE', 'DELETE_PAGE',
-  'ADD_PAGE', 'REORDER_PAGES', 'APPLY_GLOBAL_FONT', 'RESET_GLOBAL_FONT',
-]);
-
-function snapshotOf(state: DocumentState): DocumentSnapshot {
-  return { pages: state.pages, signatures: state.signatures, globalFontFamily: state.globalFontFamily, globalFontSize: state.globalFontSize };
+// Immutable data may share references, including Blob bytes, across snapshots.
+// Value comparison also keeps equivalent panel commits out of document history.
+function equal(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (a instanceof Blob || b instanceof Blob) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, i) => equal(value, b[i]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && equal(left[key], right[key]));
 }
 
-function mapPage(pages: Page[], pageId: string, fn: (p: Page) => Page): Page[] {
-  return pages.map((p) => (p.id === pageId ? fn(p) : p));
+function snapshot(workspace: Workspace): DocumentSnapshot {
+  return { pages: workspace.pages, activePageId: workspace.activePageId, ...('fontAssets' in workspace ? { fontAssets: workspace.fontAssets } : {}) };
 }
 
-// These three return the SAME `pages` reference when nothing actually changed, so callers can
-// tell a no-op edit (e.g. a contentEditable field blurring without being touched) apart from a
-// real one and skip pushing a wasted undo-history entry for it.
-function updateTextItemHtml(pages: Page[], pageId: string, itemId: string, html: string): Page[] {
-  const pageIdx = pages.findIndex((p) => p.id === pageId);
-  if (pageIdx === -1) return pages;
-  const page = pages[pageIdx];
-  if (page.kind !== 'pdf') return pages;
-  const itemIdx = page.textItems.findIndex((ti) => ti.id === itemId);
-  if (itemIdx === -1 || page.textItems[itemIdx].text === html) return pages;
-  const textItems = page.textItems.slice();
-  textItems[itemIdx] = { ...textItems[itemIdx], text: html };
-  const nextPages = pages.slice();
-  nextPages[pageIdx] = { ...page, textItems };
-  return nextPages;
+function mapPage(workspace: Workspace, id: string, update: (page: Page) => Page): Workspace {
+  const index = workspace.pages.findIndex((page) => page.id === id);
+  if (index < 0) return workspace;
+  const page = update(workspace.pages[index]);
+  if (equal(page, workspace.pages[index])) return workspace;
+  const pages = workspace.pages.slice();
+  pages[index] = page;
+  return { ...workspace, pages };
 }
 
-function updateBlockField(pages: Page[], pageId: string, blockId: string, field: EditableBlockField, html: string): Page[] {
-  const pageIdx = pages.findIndex((p) => p.id === pageId);
-  if (pageIdx === -1) return pages;
-  const page = pages[pageIdx];
-  const blockIdx = page.blocks.findIndex((b) => b.id === blockId);
-  if (blockIdx === -1) return pages;
-  const block = page.blocks[blockIdx] as unknown as Record<string, unknown>;
-  if (!(field in block) || block[field] === html) return pages;
-  const blocks = page.blocks.slice();
-  blocks[blockIdx] = { ...block, [field]: html } as unknown as typeof page.blocks[number];
-  const nextPages = pages.slice();
-  nextPages[pageIdx] = { ...page, blocks };
-  return nextPages;
-}
-
-function updateTextBoxHtml(pages: Page[], pageId: string, id: string, html: string): Page[] {
-  const pageIdx = pages.findIndex((p) => p.id === pageId);
-  if (pageIdx === -1) return pages;
-  const page = pages[pageIdx];
-  const idx = page.textBoxes.findIndex((tb) => tb.id === id);
-  if (idx === -1 || page.textBoxes[idx].text === html) return pages;
-  const textBoxes = page.textBoxes.slice();
-  textBoxes[idx] = { ...textBoxes[idx], text: html };
-  const nextPages = pages.slice();
-  nextPages[pageIdx] = { ...page, textBoxes };
-  return nextPages;
-}
-
-function applyMutation(state: DocumentState, action: Action): DocumentState {
-  switch (action.type) {
-    case 'ADD_IMAGE':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, images: [...p.images, { id: action.id, x: Math.max(0, action.x - 70), y: Math.max(0, action.y - 50), w: 140, h: 100 }] })) };
-    case 'DELETE_IMAGE':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, images: p.images.filter((i) => i.id !== action.id) })) };
-    case 'ADD_SIG_FIELD':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, signatureFields: [...p.signatureFields, { id: action.id, x: Math.max(0, action.x - 85), y: Math.max(0, action.y - 28), w: 170, h: 56, signed: false, dataUrl: null }] })) };
-    case 'DELETE_SIG_FIELD':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, signatureFields: p.signatureFields.filter((f) => f.id !== action.id) })) };
-    case 'SAVE_SIGNATURE': {
-      const { target, dataUrl } = action;
-      if (target.kind === 'fixed') {
-        return { ...state, signatures: { ...state.signatures, [target.which]: { signed: true, dataUrl } } };
+function mergeReferencedFonts(workspace: Workspace, incoming: DownloadedFontAsset[] = []): Workspace {
+  const available = validateFontAssets(workspace.fontAssets ?? []);
+  validateFontAssets(incoming);
+  const candidates = new Map(incoming.map(asset => [asset.id, asset]));
+  const added: DownloadedFontAsset[] = [];
+  for (const page of workspace.pages) {
+    if (page.kind !== 'pdf') continue;
+    for (const { content } of page.textEdits) {
+      for (const run of content.runs) {
+        const font = run.style.font;
+        if (font.kind !== 'downloaded' || available.has(font.assetId)) continue;
+        const asset = candidates.get(font.assetId);
+        if (!asset) throw new Error('다운로드한 글꼴 데이터가 없습니다.');
+        available.add(asset.id);
+        added.push(asset);
       }
-      return { ...state, pages: mapPage(state.pages, target.pageId, (p) => ({ ...p, signatureFields: p.signatureFields.map((f) => (f.id === target.id ? { ...f, signed: true, dataUrl } : f)) })) };
     }
-    case 'ADD_TEXTBOX':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, textBoxes: [...p.textBoxes, { id: action.id, x: Math.max(0, action.x - 90), y: Math.max(0, action.y - 17), w: 180, h: 34, text: '텍스트를 입력하세요' }] })) };
-    case 'DELETE_TEXTBOX':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, textBoxes: p.textBoxes.filter((t) => t.id !== action.id) })) };
-    case 'ADD_SHAPE':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, shapes: [...p.shapes, { id: action.id, x: Math.max(0, action.x - 60), y: Math.max(0, action.y - 40), w: 120, h: 80 }] })) };
-    case 'DELETE_SHAPE':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, shapes: p.shapes.filter((sh) => sh.id !== action.id) })) };
-    case 'MOVE_ITEM':
-      return {
-        ...state,
-        pages: mapPage(state.pages, action.pageId, (p) => {
-          const arr = (p as any)[action.kind] as Array<{ id: string; x: number; y: number }>;
-          return { ...p, [action.kind]: arr.map((item) => (item.id === action.id ? { ...item, x: Math.max(0, item.x + action.dx), y: Math.max(0, item.y + action.dy) } : item)) } as Page;
-        }),
-      };
+  }
+  return added.length ? { ...workspace, fontAssets: [...(workspace.fontAssets ?? []), ...added] } : workspace;
+}
+
+function hasId(workspace: Workspace, id: string): boolean {
+  return workspace.pages.some((page) => page.id === id);
+}
+
+function changeWorkspace(workspace: Workspace, action: DocumentAction): Workspace {
+  switch (action.type) {
+    case 'UPSERT_TEXT_EDIT':
+      return mapPage(workspace, action.pageId, (p) => {
+        if (p.kind !== 'pdf') return p;
+        const memberIds = action.edit.lineIds;
+        if (!Array.isArray(memberIds) || !memberIds.length || memberIds.some(id => typeof id !== 'string' || !id.length)) return p;
+        const members = new Set(memberIds);
+        if (members.size !== memberIds.length) return p;
+        const intersects = (edit: SourceTextEdit) => edit.lineIds.some(id => members.has(id));
+        if (p.textEdits.some(edit => intersects(edit) && edit.lineIds.some(id => !members.has(id)))) return p;
+        const first = p.textEdits.findIndex(intersects);
+        if (first < 0) return { ...p, textEdits: [...p.textEdits, action.edit] };
+        const textEdits = p.textEdits.filter(edit => !intersects(edit));
+        textEdits.splice(first, 0, action.edit);
+        return { ...p, textEdits };
+      });
+    case 'REMOVE_TEXT_EDIT':
+      return mapPage(workspace, action.pageId, (p) => p.kind === 'pdf' ? { ...p, textEdits: p.textEdits.filter((edit) => !edit.lineIds.includes(action.lineId)) } : p);
     case 'DUPLICATE_PAGE': {
-      const idx = state.pages.findIndex((p) => p.id === action.id);
-      if (idx === -1) return state;
-      const clone: Page = { ...JSON.parse(JSON.stringify(state.pages[idx])), id: action.newId };
-      const pages = [...state.pages];
-      pages.splice(idx + 1, 0, clone);
-      return { ...state, pages };
+      const index = workspace.pages.findIndex((p) => p.id === action.id);
+      if (index < 0 || hasId(workspace, action.newId)) return workspace;
+      const source = workspace.pages[index];
+      // Nested text data remains immutable and shared; subsequent changes replace it.
+      const clone: Page = {
+        ...source, id: action.newId,
+        ...(source.kind === 'pdf' ? { originalInstance: false, textEdits: source.textEdits.slice() } : {}),
+      };
+      const pages = workspace.pages.slice();
+      pages.splice(index + 1, 0, clone);
+      return { ...workspace, pages, activePageId: clone.id };
     }
     case 'ROTATE_PAGE':
-      return { ...state, pages: mapPage(state.pages, action.id, (p) => (p.kind === 'pdf' ? { ...p, rotation: ((p.rotation || 0) + action.delta + 360) % 360 } : p)) };
-    case 'DELETE_PAGE':
-      if (state.pages.length <= 1) return state;
-      return { ...state, pages: state.pages.filter((p) => p.id !== action.id) };
+      if (!Number.isFinite(action.delta) || action.delta % 90 !== 0) return workspace;
+      return mapPage(workspace, action.id, (p) => ({ ...p, rotation: ((p.rotation + action.delta % 360 + 360) % 360) as QuarterTurn }));
+    case 'DELETE_PAGE': {
+      const index = workspace.pages.findIndex((p) => p.id === action.id);
+      if (workspace.pages.length <= 1 || index < 0) return workspace;
+      const pages = workspace.pages.filter((p) => p.id !== action.id);
+      return { ...workspace, pages, activePageId: workspace.activePageId === action.id ? pages[Math.min(index, pages.length - 1)].id : workspace.activePageId };
+    }
     case 'ADD_PAGE':
-      return {
-        ...state,
-        pages: [...state.pages, {
-          id: action.id, label: '새 페이지', kind: 'doc', images: [], signatureFields: [], textBoxes: [], shapes: [], rotation: 0,
-          blocks: [{ id: action.id + '-b1', type: 'text', text: '새 페이지 내용을 입력하세요.' }],
-        }],
-      };
+      return hasId(workspace, action.page.id) ? workspace : { ...workspace, pages: [...workspace.pages, action.page], activePageId: action.page.id };
     case 'REORDER_PAGES': {
-      if (action.fromId === action.toId) return state;
-      const pages = [...state.pages];
-      const fromIdx = pages.findIndex((p) => p.id === action.fromId);
-      const toIdx = pages.findIndex((p) => p.id === action.toId);
-      if (fromIdx === -1 || toIdx === -1) return state;
-      const [moved] = pages.splice(fromIdx, 1);
-      pages.splice(toIdx, 0, moved);
-      return { ...state, pages };
+      if (action.fromId === action.toId) return workspace;
+      const from = workspace.pages.findIndex((p) => p.id === action.fromId);
+      const to = workspace.pages.findIndex((p) => p.id === action.toId);
+      if (from < 0 || to < 0) return workspace;
+      const pages = workspace.pages.slice();
+      const [moved] = pages.splice(from, 1);
+      pages.splice(to, 0, moved);
+      return { ...workspace, pages };
     }
-    case 'APPLY_GLOBAL_FONT':
-      return { ...state, globalFontFamily: action.family, globalFontSize: action.size };
-    case 'RESET_GLOBAL_FONT':
-      return { ...state, globalFontFamily: null, globalFontSize: null };
     default:
-      return state;
+      return workspace;
   }
 }
 
-function reducer(state: DocumentState, action: Action): DocumentState {
-  switch (action.type) {
-    case 'LOAD_DOCUMENT':
-      return { ...state, pages: action.pages, history: { undo: [], redo: [] } };
-    case 'RESTORE_STATE':
-      return { ...action.state };
-    case 'PATCH_PAGE':
-      return { ...state, pages: mapPage(state.pages, action.pageId, (p) => ({ ...p, ...action.patch }) as Page) };
-    case 'REPLACE_PAGE':
-      return { ...state, pages: mapPage(state.pages, action.pageId, () => action.page) };
-    case 'PUSH_HISTORY':
-      return { ...state, history: { undo: [...state.history.undo.slice(-19), snapshotOf(state)], redo: [] } };
-    case 'UPDATE_TEXT_ITEM': {
-      const pages = updateTextItemHtml(state.pages, action.pageId, action.itemId, action.html);
-      if (pages === state.pages) return state;
-      return { ...state, pages, history: { undo: [...state.history.undo.slice(-19), snapshotOf(state)], redo: [] } };
-    }
-    case 'UPDATE_BLOCK': {
-      const pages = updateBlockField(state.pages, action.pageId, action.blockId, action.field, action.html);
-      if (pages === state.pages) return state;
-      return { ...state, pages, history: { undo: [...state.history.undo.slice(-19), snapshotOf(state)], redo: [] } };
-    }
-    case 'UPDATE_TEXT_BOX_TEXT': {
-      const pages = updateTextBoxHtml(state.pages, action.pageId, action.id, action.html);
-      if (pages === state.pages) return state;
-      return { ...state, pages, history: { undo: [...state.history.undo.slice(-19), snapshotOf(state)], redo: [] } };
-    }
-    case 'UNDO': {
-      const { undo, redo } = state.history;
-      if (!undo.length) return state;
-      const prev = undo[undo.length - 1];
-      return { ...state, ...prev, history: { undo: undo.slice(0, -1), redo: [...redo, snapshotOf(state)] } };
-    }
-    case 'REDO': {
-      const { undo, redo } = state.history;
-      if (!redo.length) return state;
-      const next = redo[redo.length - 1];
-      return { ...state, ...next, history: { undo: [...undo, snapshotOf(state)], redo: redo.slice(0, -1) } };
-    }
-    default: {
-      if (!HISTORY_TRACKED.has(action.type)) return applyMutation(state, action);
-      const withHistory: DocumentState = {
-        ...state,
-        history: { undo: [...state.history.undo.slice(-19), snapshotOf(state)], redo: [] },
-      };
-      return applyMutation(withHistory, action);
-    }
+export function documentReducer(state: DocumentState, action: DocumentAction): DocumentState {
+  if (action.type === 'LOAD_DOCUMENT' || action.type === 'RESTORE_STATE') {
+    const restored = action.type === 'RESTORE_STATE' ? action.restoredRevision ?? 0 : 0;
+    return { workspace: action.workspace, revision: Math.max(state.revision, restored) + 1, history: { undo: [], redo: [] } };
   }
+  const workspace = state.workspace;
+  if (!workspace) return state;
+  if (action.type === 'SET_ACTIVE_PAGE') {
+    if (workspace.activePageId === action.id || !workspace.pages.some((p) => p.id === action.id)) return state;
+    return { ...state, workspace: { ...workspace, activePageId: action.id }, revision: state.revision + 1 };
+  }
+  if (action.type === 'SET_FILE_NAME') {
+    if (workspace.fileName === action.name) return state;
+    return { ...state, workspace: { ...workspace, fileName: action.name }, revision: state.revision + 1 };
+  }
+  if (action.type === 'UNDO' || action.type === 'REDO') {
+    const { undo, redo } = state.history;
+    const stack = action.type === 'UNDO' ? undo : redo;
+    if (!stack.length) return state;
+    const next = stack[stack.length - 1];
+    const restored = { ...workspace, ...next };
+    if (!('fontAssets' in next)) delete restored.fontAssets;
+    return {
+      workspace: restored, revision: state.revision + 1,
+      history: action.type === 'UNDO'
+        ? { undo: undo.slice(0, -1), redo: [...redo.slice(-19), snapshot(workspace)] }
+        : { undo: [...undo.slice(-19), snapshot(workspace)], redo: redo.slice(0, -1) },
+    };
+  }
+  let next = changeWorkspace(workspace, action);
+  if (next === workspace) return state;
+  if (action.type === 'UPSERT_TEXT_EDIT') {
+    next = mergeReferencedFonts(next, action.fontAssets);
+  }
+  return {
+    workspace: next, revision: state.revision + 1,
+    history: { undo: [...state.history.undo.slice(-19), snapshot(workspace)], redo: [] },
+  };
 }
 
-export function useDocumentReducer(initialPages: Page[]) {
-  const [state, dispatch] = useReducer(reducer, initialPages, makeInitialState);
+export interface DocumentActions {
+  loadDocument(workspace: Workspace): void;
+  restoreState(workspace: Workspace, restoredRevision?: number): void;
+  setActivePage(id: string): void;
+  setFileName(name: string): void;
+  upsertTextEdit(pageId: string, edit: SourceTextEdit, fontAssets?: DownloadedFontAsset[]): void;
+  removeTextEdit(pageId: string, lineId: string): void;
+  duplicatePage(id: string, newId: string): void;
+  rotatePage(id: string, delta: number): void;
+  deletePage(id: string): void;
+  addPage(page: BlankPage): void;
+  reorderPages(fromId: string, toId: string): void;
+  undo(): void;
+  redo(): void;
+}
 
-  const actions = useMemo(() => ({
-    loadDocument: (pages: Page[]) => dispatch({ type: 'LOAD_DOCUMENT', pages }),
-    patchPage: (pageId: string, patch: Partial<Page>) => dispatch({ type: 'PATCH_PAGE', pageId, patch }),
-    replacePage: (pageId: string, page: Page) => dispatch({ type: 'REPLACE_PAGE', pageId, page }),
-    addImage: (pageId: string, id: string, x: number, y: number) => dispatch({ type: 'ADD_IMAGE', pageId, id, x, y }),
-    deleteImage: (pageId: string, id: string) => dispatch({ type: 'DELETE_IMAGE', pageId, id }),
-    addSigField: (pageId: string, id: string, x: number, y: number) => dispatch({ type: 'ADD_SIG_FIELD', pageId, id, x, y }),
-    deleteSigField: (pageId: string, id: string) => dispatch({ type: 'DELETE_SIG_FIELD', pageId, id }),
-    saveSignature: (target: SigModalTarget, dataUrl: string) => dispatch({ type: 'SAVE_SIGNATURE', target, dataUrl }),
-    addTextBox: (pageId: string, id: string, x: number, y: number) => dispatch({ type: 'ADD_TEXTBOX', pageId, id, x, y }),
-    deleteTextBox: (pageId: string, id: string) => dispatch({ type: 'DELETE_TEXTBOX', pageId, id }),
-    addShape: (pageId: string, id: string, x: number, y: number) => dispatch({ type: 'ADD_SHAPE', pageId, id, x, y }),
-    deleteShape: (pageId: string, id: string) => dispatch({ type: 'DELETE_SHAPE', pageId, id }),
-    moveItem: (pageId: string, kind: DragKind, id: string, dx: number, dy: number) => dispatch({ type: 'MOVE_ITEM', pageId, kind, id, dx, dy }),
-    duplicatePage: (id: string, newId: string) => dispatch({ type: 'DUPLICATE_PAGE', id, newId }),
-    rotatePage: (id: string, delta: number) => dispatch({ type: 'ROTATE_PAGE', id, delta }),
-    deletePage: (id: string) => dispatch({ type: 'DELETE_PAGE', id }),
-    addPage: (id: string) => dispatch({ type: 'ADD_PAGE', id }),
-    reorderPages: (fromId: string, toId: string) => dispatch({ type: 'REORDER_PAGES', fromId, toId }),
-    applyGlobalFont: (family: string, size: number) => dispatch({ type: 'APPLY_GLOBAL_FONT', family, size }),
-    resetGlobalFont: () => dispatch({ type: 'RESET_GLOBAL_FONT' }),
-    updateTextItem: (pageId: string, itemId: string, html: string) => dispatch({ type: 'UPDATE_TEXT_ITEM', pageId, itemId, html }),
-    updateBlock: (pageId: string, blockId: string, field: EditableBlockField, html: string) => dispatch({ type: 'UPDATE_BLOCK', pageId, blockId, field, html }),
-    updateTextBoxText: (pageId: string, id: string, html: string) => dispatch({ type: 'UPDATE_TEXT_BOX_TEXT', pageId, id, html }),
-    restoreState: (state: any) => dispatch({ type: 'RESTORE_STATE', state }),
-    pushHistory: () => dispatch({ type: 'PUSH_HISTORY' }),
+export function useDocumentReducer() {
+  const [state, setState] = useState(initialDocumentState);
+  const current = useRef(state);
+  const dispatch = useCallback((action: DocumentAction) => {
+    const next = documentReducer(current.current, action);
+    if (next === current.current) return;
+    current.current = next;
+    setState(next);
+  }, []);
+  const getState = useCallback(() => current.current, []);
+  const actions = useMemo<DocumentActions>(() => ({
+    loadDocument: (workspace) => dispatch({ type: 'LOAD_DOCUMENT', workspace }),
+    restoreState: (workspace, restoredRevision) => dispatch({ type: 'RESTORE_STATE', workspace, restoredRevision }),
+    setActivePage: (id) => dispatch({ type: 'SET_ACTIVE_PAGE', id }),
+    setFileName: (name) => dispatch({ type: 'SET_FILE_NAME', name }),
+    upsertTextEdit: (pageId, edit, fontAssets) => dispatch({ type: 'UPSERT_TEXT_EDIT', pageId, edit, fontAssets }),
+    removeTextEdit: (pageId, lineId) => dispatch({ type: 'REMOVE_TEXT_EDIT', pageId, lineId }),
+    duplicatePage: (id, newId) => dispatch({ type: 'DUPLICATE_PAGE', id, newId }),
+    rotatePage: (id, delta) => dispatch({ type: 'ROTATE_PAGE', id, delta }),
+    deletePage: (id) => dispatch({ type: 'DELETE_PAGE', id }),
+    addPage: (page) => dispatch({ type: 'ADD_PAGE', page }),
+    reorderPages: (fromId, toId) => dispatch({ type: 'REORDER_PAGES', fromId, toId }),
     undo: () => dispatch({ type: 'UNDO' }),
     redo: () => dispatch({ type: 'REDO' }),
-  }), []);
-
-  return { state, actions };
+  }), [dispatch]);
+  return { state, actions, getState };
 }
-
-export type { PartyWhich };

@@ -1,701 +1,232 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
-import type { RefObject } from 'react';
-import type { ChangeEvent, MouseEvent as ReactMouseEvent, KeyboardEvent } from 'react';
-import type { Page, Signatures, Tool, SigModalTarget, DragKind } from '../../../types/pdfEditor';
-import type { EditableBlockField } from '../../../hooks/useDocumentReducer';
-import { ACCENT, BORDER, BORDER_SOFT, BORDER_STRONG, SURFACE, PAGE, TEXT, TEXT_MUTED, TEXT_SUBTLE, CANVAS_BG, PAGE_SHADOW, TOOLBAR_H, FORMAT_H, RAIL_CARD_H, RAIL_GAP, TOOL_BTN, FONT_STACK, solidAccentBtn, outlineAccentBtn, spinnerAccentStyle, toolBase, toolActive, toolDisabled } from '../../../styles/theme';
-import { useCanvasPointerInteractions } from '../../../hooks/useCanvasPointerInteractions';
-import { useSelectionPreserve } from '../../../hooks/useSelectionPreserve';
-
-export interface EditorDocActions {
-  patchPage: (pageId: string, patch: Partial<Page>) => void;
-  replacePage: (pageId: string, page: Page) => void;
-  addImage: (pageId: string, id: string, x: number, y: number) => void;
-  deleteImage: (pageId: string, id: string) => void;
-  addSigField: (pageId: string, id: string, x: number, y: number) => void;
-  deleteSigField: (pageId: string, id: string) => void;
-  saveSignature: (target: SigModalTarget, dataUrl: string) => void;
-  addTextBox: (pageId: string, id: string, x: number, y: number) => void;
-  deleteTextBox: (pageId: string, id: string) => void;
-  addShape: (pageId: string, id: string, x: number, y: number) => void;
-  deleteShape: (pageId: string, id: string) => void;
-  moveItem: (pageId: string, kind: DragKind, id: string, dx: number, dy: number) => void;
-  duplicatePage: (id: string, newId: string) => void;
-  rotatePage: (id: string, delta: number) => void;
-  deletePage: (id: string) => void;
-  addPage: (id: string) => void;
-  reorderPages: (fromId: string, toId: string) => void;
-  applyGlobalFont: (family: string, size: number) => void;
-  resetGlobalFont: () => void;
-  updateTextItem: (pageId: string, itemId: string, html: string) => void;
-  updateBlock: (pageId: string, blockId: string, field: EditableBlockField, html: string) => void;
-  updateTextBoxText: (pageId: string, id: string, html: string) => void;
-  restoreState: (state: any) => void;
-  pushHistory: () => void;
-  undo: () => void;
-  redo: () => void;
-}
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeftRight, ChevronLeft, ChevronRight, Download, FileText, Hand, LayoutGrid, Minus, MousePointer2, Plus, Redo2, Undo2 } from 'lucide-react';
+import type { DocumentState, DownloadedFontAsset, EditController, Page, TextContent, Tool, Workspace } from '../../../types/pdfEditor';
+import type { DocumentActions } from '../../../hooks/useDocumentReducer';
+import type { PdfDocumentController } from '../../../hooks/usePdfDocument';
+import type { EditableTextTarget, RenderedPage, SourceFontInfo, SourceTextLine } from '../../../pdf/engineTypes';
+import type { SaveStatus } from '../../../utils/db';
+import { plainText } from '../../../pdf/textEditing';
+import { buildSourceTextGroup } from '../../../pdf/sourceTextGroups';
+import { ACCENT, BORDER, BORDER_STRONG, DANGER, PANEL_SHADOW, SURFACE, TEXT, TEXT_SUBTLE, CANVAS_BG, TOOLBAR_H, RAIL_CARD_H, solidAccentBtn, toolBase, toolActive } from '../../../styles/theme';
+import { PdfPageSurface } from './PdfPageSurface';
+import { PageThumbnail } from './GridView';
+import { TextEditPanel } from './TextEditPanel';
 
 export interface EditorScreenProps {
-  fileName: string;
-  onFileNameChange: (name: string) => void;
-  pages: Page[];
-  signatures: Signatures;
-  globalFontFamily: string | null;
-  globalFontSize: number | null;
-  docActions: EditorDocActions;
-  canUndo: boolean;
-  canRedo: boolean;
-  activePageId: string;
-  setActivePageId: (id: string) => void;
-  pageNumInput: string;
-  setPageNumInput: (s: string) => void;
-  goToPageIndex: (idx: number) => void;
-  zoom: number;
-  setZoom: (z: number) => void;
-  pageWrapRef: RefObject<HTMLDivElement | null>;
-  ensurePageProcessed: (page: Page | undefined) => Promise<void>;
-  isExporting: boolean;
-  showToast: (msg: string) => void;
-  goToUpload: () => void;
-  goExport: () => void;
-  onOpenGridView: () => void;
-  onDuplicatePage: (id: string) => void;
-  onRotatePage: (id: string, delta: number) => void;
-  onDeletePage: (id: string) => void;
-  onAddPage: () => void;
-  onReorderPages: (fromId: string, toId: string) => void;
-  onThumbClick: (id: string) => void;
-  onOpenSigModal: (target: SigModalTarget) => void;
-  activeTool: Tool;
-  setActiveTool: (t: Tool) => void;
+  workspace: Workspace; revision: number; engine: PdfDocumentController; docActions: DocumentActions;
+  getDocumentState: () => DocumentState; canUndo: boolean; canRedo: boolean;
+  pageNumInput: string; setPageNumInput: (s: string) => void; goToPageIndex: (i: number) => void;
+  zoom: number; setZoom: (z: number) => void; isExporting: boolean; showToast: (s: string) => void;
+  goToUpload: () => void; goExport: () => void; onOpenGridView: () => void;
+  onDuplicatePage: (id: string) => void; onRotatePage: (id: string, delta: number) => void; onDeletePage: (id: string) => void;
+  onAddPage: () => void; onReorderPages: (from: string, to: string) => void; onThumbClick: (id: string) => void;
+  activeTool: Tool; setActiveTool: (t: Tool) => void;
+  onFileNameChange: (s: string) => void; saveStatus: SaveStatus; onRetrySave: () => void;
+  hasUnappliedEdit: boolean; onUnappliedEditChange: (v: boolean) => void;
+  registerEditController: (c: EditController | null) => void;
 }
-
-const FONT_FAMILY_OPTIONS = [
-  { value: "'Pretendard',sans-serif", label: 'Pretendard' },
-  { value: "'Noto Sans KR',sans-serif", label: 'Noto Sans KR' },
-  { value: "'Noto Serif KR',serif", label: 'Noto Serif KR' },
-  { value: "'Nanum Gothic',sans-serif", label: 'Nanum Gothic' },
-  { value: "'Nanum Myeongjo',serif", label: 'Nanum Myeongjo' },
-  { value: 'Georgia,serif', label: 'Georgia' },
-  { value: "'Courier New',monospace", label: 'Courier New' },
-  { value: "'Times New Roman','Liberation Serif',serif", label: 'Times New Roman' },
-  { value: "Arial,'Liberation Sans',sans-serif", label: 'Arial' },
-  { value: "'Palatino Linotype','Book Antiqua',Palatino,serif", label: 'Palatino Linotype' },
-  { value: "'FreeMono','Courier New',monospace", label: 'Free Mono' },
-  { value: "'Source Han Serif KR','Noto Serif KR',serif", label: 'Source Han Serif KR' },
-];
-
-const COLOR_SWATCHES = ['#1f2937', '#c0392b', '#1f7a4c', '#b8860b'];
-const HIGHLIGHT_SWATCHES = ['#FDE68A', '#BBF7D0', '#BFDBFE', '#FBCFE8'];
-
-const RAIL_OPEN_W = 176;
-const RAIL_COLLAPSED_W = 32;
-
-function rotTransform(deg: number): React.CSSProperties {
-  return deg ? { transform: `rotate(${deg}deg)` } : {};
-}
-
-export function EditorScreen(props: EditorScreenProps) {
-  const {
-    fileName, onFileNameChange, pages, signatures, globalFontFamily: gFam, globalFontSize: gSize,
-    docActions, canUndo, canRedo, activePageId, setActivePageId, pageNumInput, setPageNumInput,
-    goToPageIndex, zoom, setZoom, pageWrapRef, ensurePageProcessed, isExporting, showToast,
-    goToUpload, goExport, onOpenGridView, onDuplicatePage, onRotatePage, onDeletePage, onAddPage,
-    onReorderPages, onThumbClick, onOpenSigModal, activeTool: t, setActiveTool,
-  } = props;
-
+interface EditSelection { target: EditableTextTarget; original?: SourceTextLine; fonts?: SourceFontInfo[]; revision: number; requiresCommit?: boolean }
+const labels: Record<Tool, string> = { pan: '손 도구', select: '선택' };
+const toolIcons = { pan: Hand, select: MousePointer2 };
+const saveLabels: Record<SaveStatus, string> = { dirty: '저장되지 않은 변경', saving: '저장 중…', saved: '자동 저장됨', error: '저장 실패 · 다시 시도' };
+export function EditorScreen(p: EditorScreenProps) {
+  const { workspace, engine, docActions } = p;
+  const page = workspace.pages.find(item => item.id === workspace.activePageId)!;
+  const index = workspace.pages.indexOf(page);
   const [railOpen, setRailOpen] = useState(true);
-  const [hoveredPageId, setHoveredPageId] = useState<string | null>(null);
-  const [fontToolFamily, setFontToolFamily] = useState("'Pretendard',sans-serif");
-  const [fontToolSize, setFontToolSize] = useState(15);
-  const [fontToolSizeInput, setFontToolSizeInput] = useState('15');
-
-  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
-  const railListRef = useRef<HTMLDivElement | null>(null);
-  const draggingThumbIdRef = useRef<string | null>(null);
-
-  const activeIndex = Math.max(0, pages.findIndex((p) => p.id === activePageId));
-  const activePage = pages[activeIndex] || pages[0];
-  const activePageIsPdf = activePage.kind === 'pdf';
-
-  // ---- Pointer interactions (drag items) ----
-  const pointerActions = {
-    moveItem: docActions.moveItem,
-    pushHistory: docActions.pushHistory,
-  };
-  const pointer = useCanvasPointerInteractions(pointerActions);
-
-  // ---- Selection formatting ----
-  const sel = useSelectionPreserve(pageWrapRef, showToast);
-
-  // ---- Scroll active thumbnail into view ----
+  const [render, setRender] = useState<RenderedPage | null>(null);
+  const [renderError, setRenderError] = useState('');
+  const [selection, setSelection] = useState<EditableTextTarget | null>(null);
+  const [sourceSelections, setSourceSelections] = useState<Extract<EditableTextTarget, { kind: 'source' }>[]>([]);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [edit, setEdit] = useState<EditSelection | null>(null);
+  const [candidate, setCandidate] = useState<{ page: Page; revision: number } | null>(null);
+  const [dpr, setDpr] = useState(window.devicePixelRatio || 1);
+  const controller = useRef<EditController | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const draggingThumb = useRef<string | null>(null);
+  const selectionToken = useRef(0);
+  const editable = !!engine.info?.canEdit && !p.isExporting;
+  const assemble = !!engine.info?.canAssemble && !p.isExporting;
+  const latest = useRef(p); latest.current = p;
+  const cancel = useCallback(() => { selectionToken.current++; controller.current?.cancel(); setEdit(null); setCandidate(null); latest.current.onUnappliedEditChange(false); }, []);
+  const clearSelection = useCallback(() => { cancel(); setSelection(null); setSourceSelections([]); }, [cancel]);
+  const flush = useCallback(async () => controller.current ? controller.current.flush() : true, []);
   useEffect(() => {
-    if (!activePageId) return;
-    const activeThumb = document.getElementById(`pdfe-thumb-${activePageId}`);
-    if (activeThumb) {
-      activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [activePageId]);
-
-  // ---- Tool selection ----
-  const selectTool = useCallback((name: Tool) => setActiveTool(name), [setActiveTool]);
-
-  // ---- Font toolbar handlers ----
-  const onFontFamilyChange = (e: ChangeEvent<HTMLSelectElement>) => setFontToolFamily(e.target.value);
-  const onFontSizeChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/[^0-9]/g, '').slice(0, 3);
-    const v = parseInt(raw, 10);
-    setFontToolSizeInput(raw);
-    if (Number.isFinite(v) && v > 0) setFontToolSize(Math.max(8, Math.min(96, v)));
+    p.registerEditController({ flush, cancel });
+    return () => p.registerEditController(null);
+  }, [p.registerEditController, flush, cancel]);
+  const registerPanel = useCallback((c: EditController | null) => { controller.current = c; }, []);
+  const preview = useCallback((next: Page | null, revision: number) => setCandidate(next ? { page: next, revision } : null), []);
+  const dirty = useCallback((value: boolean) => latest.current.onUnappliedEditChange(value), []);
+  useEffect(() => { setSelection(null); setSourceSelections([]); setMultiSelect(false); setRender(null); cancel(); }, [workspace.id, page.id, cancel]);
+  useEffect(() => { selectionToken.current++; setSelection(null); setSourceSelections([]); setMultiSelect(false); }, [p.activeTool]);
+  useEffect(() => { selectionToken.current++; setSelection(null); setSourceSelections([]); setRender(null); }, [engine.sessionId]);
+  useEffect(() => { if (edit && edit.revision !== p.revision) cancel(); }, [p.revision, edit, cancel]);
+  useEffect(() => {
+    if (workspace.fontAssets?.length) void engine.registerFonts(workspace.fontAssets).catch(error => latest.current.showToast(error instanceof Error ? error.message : '저장된 글꼴을 불러오지 못했습니다.'));
+  }, [workspace.fontAssets, engine.registerFonts, engine.sessionId]);
+  useEffect(() => {
+    const resize = () => setDpr(window.devicePixelRatio || 1);
+    window.addEventListener('resize', resize); return () => window.removeEventListener('resize', resize);
+  }, []);
+  useEffect(() => {
+    let current = true;
+    setRenderError('');
+    void engine.render(candidate?.page || page, 96 / 72 * p.zoom * dpr, p.revision, candidate?.revision || 0, 'active').then(result => {
+      if (current) setRender(result);
+    }).catch(error => { if (current) setRenderError(error instanceof Error ? error.message : '페이지 표시 실패'); });
+    return () => { current = false; };
+  }, [page, candidate, p.revision, p.zoom, dpr, engine.render, engine.sessionId]);
+  const guarded = async (action: () => void) => { if (!p.isExporting && await flush()) action(); };
+  const undo = useCallback((redo: boolean) => { if (latest.current.isExporting) return; cancel(); setSelection(null); setSourceSelections([]); if (redo) latest.current.docActions.redo(); else latest.current.docActions.undo(); }, [cancel]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.isComposing && !latest.current.isExporting) { clearSelection(); return; }
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z' || event.isComposing) return;
+      if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
+      event.preventDefault(); undo(event.shiftKey);
+    };
+    window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
+  }, [undo, clearSelection]);
+  const choose = async (target: EditableTextTarget, open: boolean, additive = false) => {
+    if (latest.current.isExporting || !await flush()) return;
+    const token = additive ? selectionToken.current : ++selectionToken.current;
+    const state = latest.current.getDocumentState();
+    const session = engine.sessionId;
+    const currentPage = state.workspace?.pages.find(item => item.id === page.id);
+    if (!currentPage || state.workspace?.activePageId !== page.id) return;
+    try {
+      let original: SourceTextLine | undefined;
+      let fonts: SourceFontInfo[] | undefined;
+      let resolvedTarget: EditableTextTarget;
+      if (currentPage.kind === 'pdf') {
+        const source = await engine.text(currentPage.sourcePageIndex);
+        fonts = source.fonts;
+        const sourceEdit = currentPage.textEdits.find(item => item.lineIds.includes(target.lineIds[0]));
+        original = source.lines.find(line => line.lineId === target.lineIds[0]);
+        if (!original) return;
+        if (sourceEdit && sourceEdit.lineIds.length > 1) {
+          const group = buildSourceTextGroup(currentPage, source, sourceEdit.lineIds);
+          resolvedTarget = { kind: 'source', ...group, content: sourceEdit.content, widthPt: sourceEdit.widthPt, layout: sourceEdit.layout, editable: true };
+          original = undefined;
+        } else {
+          resolvedTarget = { kind: 'source', lineIds: [original.lineId], bounds: original.bounds, quads: original.chars.map(char => char.quad), content: sourceEdit?.content || original.content, widthPt: sourceEdit?.widthPt ?? original.widthPt, editable: original.editable, reason: original.reason };
+        }
+      } else return;
+      if (token !== selectionToken.current || latest.current.getDocumentState().revision !== state.revision || latest.current.engine.sessionId !== session) return;
+      if (additive) {
+        if (!resolvedTarget.editable) { p.showToast('편집 가능한 원본 텍스트만 묶을 수 있습니다.'); return; }
+        const sourceTarget = resolvedTarget;
+        setSourceSelections(previous => previous.some(item => item.lineIds.some(id => sourceTarget.lineIds.includes(id)))
+          ? previous.filter(item => !item.lineIds.some(id => sourceTarget.lineIds.includes(id)))
+          : [...previous, sourceTarget]);
+        setSelection(null);
+        return;
+      }
+      setSelection(resolvedTarget);
+      setSourceSelections([resolvedTarget]);
+      if (!open) return;
+      if (!engine.info?.canEdit || latest.current.isExporting || !resolvedTarget.editable) { p.showToast(resolvedTarget.reason || '이 문서는 본문 편집 권한이 없습니다.'); return; }
+      setEdit({ target: resolvedTarget, original, fonts, revision: state.revision });
+    } catch (error) { p.showToast(error instanceof Error ? error.message : '텍스트를 열 수 없습니다.'); }
   };
-  const onFontSizeBlur = () => setFontToolSizeInput(String(fontToolSize));
-  const sizeDecClick = () => { const v = Math.max(8, fontToolSize - 1); setFontToolSize(v); setFontToolSizeInput(String(v)); };
-  const sizeIncClick = () => { const v = Math.min(96, fontToolSize + 1); setFontToolSize(v); setFontToolSizeInput(String(v)); };
-
-  const applyFontToSelection = useCallback(() => {
-    sel.applyFontToSelection(fontToolFamily, fontToolSize);
-  }, [sel, fontToolFamily, fontToolSize]);
-
-  const applyFontToAll = useCallback(() => {
-    docActions.pushHistory();
-    docActions.applyGlobalFont(fontToolFamily, fontToolSize);
-    showToast('문서 전체에 글꼴을 적용했습니다');
-  }, [docActions, fontToolFamily, fontToolSize, showToast]);
-
-  const resetGlobalFont = useCallback(() => {
-    docActions.pushHistory();
-    docActions.resetGlobalFont();
-    showToast('원래 글꼴로 되돌렸습니다');
-  }, [docActions, showToast]);
-
-  // ---- Zoom ----
-  const zoomIn = () => setZoom(Math.min(3, +(zoom + 0.1).toFixed(2)));
-  const zoomOut = () => setZoom(Math.max(0.4, +(zoom - 0.1).toFixed(2)));
-  const fitToWidth = () => {
-    const el = scrollAreaRef.current;
-    if (!el) return;
-    const baseW = activePageIsPdf ? (activePage.imgW || 800) : 800;
-    const avail = el.clientWidth - 80;
-    setZoom(+Math.max(0.3, Math.min(3, avail / baseW)).toFixed(2));
+  const groupSelection = async () => {
+    if (!editable || sourceSelections.length < 2 || !await flush()) return;
+    const token = ++selectionToken.current;
+    const state = latest.current.getDocumentState();
+    const session = engine.sessionId;
+    const currentPage = state.workspace?.pages.find(item => item.id === page.id);
+    if (currentPage?.kind !== 'pdf' || state.workspace?.activePageId !== page.id) return;
+    try {
+      const source = await engine.text(currentPage.sourcePageIndex);
+      if (token !== selectionToken.current || latest.current.getDocumentState().revision !== state.revision || latest.current.engine.sessionId !== session) return;
+      const group = buildSourceTextGroup(currentPage, source, sourceSelections.flatMap(target => target.lineIds));
+      const target: EditableTextTarget = { kind: 'source', ...group, editable: true };
+      setSelection(target);
+      setMultiSelect(false);
+      setEdit({ target, fonts: source.fonts, revision: state.revision, requiresCommit: true });
+    } catch (error) { p.showToast(error instanceof Error ? error.message : '선택한 텍스트를 묶을 수 없습니다.'); }
   };
-
-  // ---- Page navigation ----
-  const prevPage = () => goToPageIndex(activeIndex - 1);
-  const nextPage = () => goToPageIndex(activeIndex + 1);
-  const onPageNumChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setPageNumInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 4));
+  const commit = (content: TextContent, widthPt: number, fontAssets: DownloadedFontAsset[] = []) => {
+    if (!edit || !engine.info?.canEdit || p.getDocumentState().revision !== edit.revision) return;
+    const target = edit.target;
+    const original = edit.original;
+    if (target.lineIds.length === 1 && original && original.widthPt === widthPt && JSON.stringify(original.content) === JSON.stringify(content)) docActions.removeTextEdit(page.id, target.lineIds[0]);
+    else docActions.upsertTextEdit(page.id, { lineIds: target.lineIds, layout: target.layout, content, widthPt }, fontAssets);
+    const committedTarget = { ...target, content, widthPt };
+    setSelection(committedTarget);
+    setSourceSelections([committedTarget]);
+    setEdit(null); setCandidate(null); p.onUnappliedEditChange(false);
   };
-  const onPageNumCommit = () => {
-    const n = parseInt(pageNumInput, 10);
-    if (Number.isFinite(n) && n >= 1 && n <= pages.length) goToPageIndex(n - 1);
-    else setPageNumInput(String(activeIndex + 1));
+  const copy = async () => {
+    if (!engine.info?.canCopy || !selection) return;
+    try {
+      const currentContent = page.kind === 'pdf' ? page.textEdits.find(item => item.lineIds.length === selection.lineIds.length && item.lineIds.every(id => selection.lineIds.includes(id)))?.content : undefined;
+      let text = plainText(currentContent || selection.content);
+      if (selection.lineIds.length === 1 && page.kind === 'pdf' && !currentContent) {
+        const b = selection.bounds;
+        text = await engine.copySourceText(page.sourcePageIndex, [b[0], (b[1] + b[3]) / 2], [b[2], (b[1] + b[3]) / 2]);
+      }
+      await navigator.clipboard.writeText(text); p.showToast('텍스트를 복사했습니다.');
+    } catch (error) { p.showToast(error instanceof Error ? error.message : '복사 실패'); }
   };
-  const onPageNumKeyDown = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') e.currentTarget.blur(); };
-
-  // ---- Page click (add items based on tool) ----
-  const onPageClick = (e: ReactMouseEvent) => {
-    if (t !== 'image' && t !== 'signature' && t !== 'shape' && !(activePageIsPdf && t === 'text')) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    if (t === 'image') docActions.addImage(activePageId, 'img' + Date.now(), x, y);
-    else if (t === 'signature') docActions.addSigField(activePageId, 'sf' + Date.now(), x, y);
-    else if (t === 'shape') docActions.addShape(activePageId, 'shp' + Date.now(), x, y);
-    else if (t === 'text' && activePageIsPdf) docActions.addTextBox(activePageId, 'tb' + Date.now(), x, y);
-  };
-
-  // ---- Thumb drag reorder ----
-  const onThumbDragStart = (e: ReactMouseEvent) => { draggingThumbIdRef.current = (e.currentTarget as HTMLElement).dataset.pageId || null; };
-  const onThumbDragOver = (e: ReactMouseEvent) => e.preventDefault();
-  const onThumbDrop = (e: ReactMouseEvent) => {
-    e.preventDefault();
-    const targetId = (e.currentTarget as HTMLElement).dataset.pageId || '';
-    const fromId = draggingThumbIdRef.current;
-    if (!fromId || fromId === targetId) return;
-    docActions.pushHistory();
-    onReorderPages(fromId, targetId);
-    draggingThumbIdRef.current = null;
-  };
-
-  // ---- Pan tool: drag-to-scroll ----
-  const onScrollAreaMouseDown = (e: ReactMouseEvent) => {
-    if (t !== 'pan') return;
-    e.preventDefault();
-    const el = scrollAreaRef.current;
-    if (!el) return;
-    const start = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
-    const onMove = (ev: MouseEvent) => { el.scrollLeft = start.sl - (ev.clientX - start.x); el.scrollTop = start.st - (ev.clientY - start.y); };
-    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
-  const stopProp = (e: ReactMouseEvent) => e.stopPropagation();
-
-  // ---- Derived styles ----
-
-  const isTextEditable = t !== 'image' && t !== 'signature' && t !== 'pan';
-  const textLayerInteractive = t === 'select' || t === 'text';
-
-  const mainRot = activePage.rotation || 0;
-  const mainRotOdd = mainRot === 90 || mainRot === 270;
-  const baseW = activePageIsPdf ? activePage.imgW : 800;
-  const baseH = activePageIsPdf ? activePage.imgH : null;
-  const mainRotTransform = mainRot === 0 ? 'none' : mainRot === 90 ? 'rotate(90deg) translateY(-100%)' : mainRot === 180 ? 'rotate(180deg)' : 'rotate(270deg) translateX(-100%)';
-  const mainRotOrigin = mainRot === 180 ? 'center center' : 'top left';
-
-  const pageOuterStyle: React.CSSProperties = activePageIsPdf
-    ? { position: 'relative', flex: 'none', width: (mainRotOdd ? baseH : baseW) || 800, height: (mainRotOdd ? baseW : baseH) || 600, zoom: zoom }
-    : { position: 'relative', flex: 'none', zoom: zoom };
-
-  const pageWrapStyle: React.CSSProperties = activePageIsPdf
-    ? { width: activePage.imgW!, height: activePage.imgH!, flex: 'none', background: PAGE, boxShadow: PAGE_SHADOW, position: 'absolute', top: 0, left: 0, overflow: 'hidden', fontFamily: "'Noto Serif KR',serif", cursor: t === 'pan' ? 'grab' : (t === 'image' || t === 'signature' || t === 'text' || t === 'shape') ? 'crosshair' : 'default', transform: mainRotTransform, transformOrigin: mainRotOrigin }
-    : { width: '800px', minHeight: '1040px', flex: 'none', background: PAGE, boxShadow: PAGE_SHADOW, position: 'relative', overflow: mainRot ? 'visible' : 'hidden', padding: '64px 68px', fontFamily: "'Noto Serif KR',serif", cursor: t === 'pan' ? 'grab' : (t === 'image' || t === 'signature' || t === 'shape') ? 'crosshair' : 'text', transform: mainRot ? `rotate(${mainRot}deg)` : 'none', transformOrigin: 'center center' };
-
-  const scrollAreaStyle: React.CSSProperties = { flex: 1, overflow: 'auto', background: CANVAS_BG, padding: '40px 0 90px', display: 'flex', justifyContent: 'center', cursor: t === 'pan' ? 'grab' : 'default', transition: 'background .2s' };
-
-  const railPanelStyle: React.CSSProperties = { width: (railOpen ? RAIL_OPEN_W : RAIL_COLLAPSED_W), flex: `0 0 ${(railOpen ? RAIL_OPEN_W : RAIL_COLLAPSED_W)}px`, borderRight: `1px solid ${BORDER}`, background: SURFACE, display: 'flex', flexDirection: 'column', transition: 'flex-basis .15s ease' };
-  const panelCollapseBtnStyle: React.CSSProperties = { border: 'none', background: 'none', cursor: 'pointer', color: TEXT_MUTED, width: 22, height: 22, flex: '0 0 22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, borderRadius: 8 };
-  const panelExpandBtnStyle: React.CSSProperties = { border: 'none', background: 'none', cursor: 'pointer', color: TEXT_MUTED, width: '100%', height: 40, flex: '0 0 40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 };
-
-  const exportCtaBtnStyle = solidAccentBtn({ padding: '9px 20px', fontSize: '13.5px' });
-  const applySelectionBtnStyle = outlineAccentBtn({ height: 30, padding: '0 12px', fontSize: '12.5px', flex: '0 0 auto', whiteSpace: 'nowrap' });
-  const applyAllBtnStyle = solidAccentBtn({ height: 30, padding: '0 12px', fontSize: '12.5px', flex: '0 0 auto', whiteSpace: 'nowrap', borderRadius: '6px' });
-
-  const toolbarRowStyle: React.CSSProperties = { height: TOOLBAR_H, flex: `0 0 ${TOOLBAR_H}px`, display: 'flex', alignItems: 'center', gap: 5, padding: '0 14px', borderBottom: `1px solid ${BORDER}`, background: SURFACE, transition: 'flex-basis .15s' };
-  const formatRowStyle: React.CSSProperties = { height: FORMAT_H, flex: `0 0 ${FORMAT_H}px`, display: 'flex', alignItems: 'center', padding: '0 18px', borderBottom: `1px solid ${BORDER}`, background: SURFACE, gap: 8, overflowX: 'auto', transition: 'flex-basis .15s' };
-  const railListStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', padding: '6px 14px 14px', display: 'flex', flexDirection: 'column', gap: RAIL_GAP };
-
-  const activePagePending = activePageIsPdf && !!(activePage as any).pending;
-  const activePageTextPending = activePageIsPdf && !(activePage as any).pending && !!(activePage as any).textPending;
-
-  return (
-    <div data-screen-label="편집기" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Header (Matching HWP Editor Perfectly with Centered Filename) */}
-      <div
-        style={{
-          height: 60,
-          flex: '0 0 60px',
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 28px',
-          borderBottom: `1px solid ${BORDER}`,
-          background: SURFACE,
-          position: 'relative',
-          boxSizing: 'border-box'
-        }}
-      >
-        {/* Left Side: Brand Logo acting as "Exit/Back to Upload Screen" */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <button
-            onClick={goToUpload}
-            style={{
-              fontSize: 19,
-              fontWeight: 800,
-              letterSpacing: '-.6px',
-              color: TEXT,
-              padding: 0,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontFamily: "'Pretendard',system-ui,sans-serif",
-              transition: 'opacity .12s'
-            }}
-            title="목록으로 이동"
-          >
-            PDF 편집
-          </button>
-        </div>
-
-        {/* Center: File Name (Elegant, Centered, contentEditable, beautiful text styling) */}
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontFamily: "'Pretendard',system-ui,sans-serif"
-          }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3d5afe" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-            <line x1="10" y1="9" x2="8" y2="9" />
-          </svg>
-          <div
-            contentEditable
-            suppressContentEditableWarning
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: TEXT,
-              outline: 'none',
-              borderBottom: '1px dashed transparent',
-              cursor: 'text',
-              padding: '2px 4px',
-              borderRadius: 4,
-              transition: 'border-color .15s'
-            }}
-            onBlur={(e) => onFileNameChange(e.currentTarget.textContent || '')}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--pdfe-border-strong, #d7d7dd)'; }}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
-          >
-            {fileName}
-          </div>
-        </div>
-
-        {/* Right Side: Auto-Saved indicator & Export button */}
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: TEXT_SUBTLE, fontFamily: "'Pretendard',system-ui,sans-serif", fontWeight: 500 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', animation: 'pdfe-pulse 2s ease-in-out infinite' }} />
-            <span>자동 저장됨</span>
-          </div>
-          <button onClick={goExport} style={exportCtaBtnStyle}>내보내기</button>
-        </div>
+  const commitPageNumber = () => { const n = Number(p.pageNumInput); if (Number.isInteger(n) && n >= 1 && n <= workspace.pages.length) p.goToPageIndex(n - 1); else p.setPageNumInput(String(index + 1)); };
+  return <div className="pdfe-screen-enter" data-screen-label="편집기" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <header className="pdfe-editor-header" style={{ position: 'relative', display: 'flex', alignItems: 'center', borderBottom: `1px solid ${BORDER}`, background: SURFACE }}>
+      <button className="pdfe-brand" onClick={p.goToUpload} style={{ background: 'var(--pdfe-button-bg, transparent)', border: 0, height: 32, borderRadius: 9999, fontSize: 17, fontWeight: 500, letterSpacing: '-.025em', color: TEXT, flexShrink: 0 }}>PDF 편집</button>
+      <div className="pdfe-filename" style={{ minWidth: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <FileText size={22} strokeWidth={1.5} />
+        <input aria-label="파일명" title={workspace.fileName} disabled={p.isExporting} value={workspace.fileName} onChange={e => p.onFileNameChange(e.target.value)} style={{ width: 220, minWidth: 0, maxWidth: '100%', height: 32, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '6px 12px', background: SURFACE, color: TEXT, fontSize: 14, fontWeight: 500, textOverflow: 'ellipsis' }} />
       </div>
-
-      {/* Toolbar */}
-      <div style={toolbarRowStyle}>
-        <button onClick={onOpenGridView} title="전체 페이지 보기" style={toolBase}>
-          <div style={{ width: 14, height: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 2 }}>
-            <div style={{ background: 'currentColor', borderRadius: 1 }} /><div style={{ background: 'currentColor', borderRadius: 1 }} />
-            <div style={{ background: 'currentColor', borderRadius: 1 }} /><div style={{ background: 'currentColor', borderRadius: 1 }} />
-          </div>
-        </button>
-        <div style={{ width: 1, height: 22, background: BORDER_SOFT }} />
-        <button onClick={() => selectTool('pan')} title="손 도구" style={t === 'pan' ? toolActive : toolBase}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5" />
-            <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v6" />
-            <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
-            <path d="M18 8a2 2 0 0 1 2 2v6a6 6 0 0 1-6 6h-2c-2.11 0-4.1-.82-5.58-2.33L4 13.5a1.5 1.5 0 0 1 2.12-2.12L9 14.25V11" />
-          </svg>
-        </button>
-        <button onClick={() => selectTool('select')} title="선택" style={t === 'select' ? toolActive : toolBase}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /></svg>
-        </button>
-        <div style={{ width: 1, height: 22, background: BORDER_SOFT }} />
-        <button onClick={() => selectTool('text')} title="텍스트" style={t === 'text' ? toolActive : toolBase}><span style={{ fontSize: 15, fontWeight: 800 }}>T</span></button>
-        <button onClick={() => selectTool('image')} title="이미지" style={t === 'image' ? toolActive : toolBase}><div style={{ width: 15, height: 12, border: '2px solid currentColor', borderRadius: 2 }} /></button>
-        <button onClick={() => selectTool('shape')} title="도형" style={t === 'shape' ? toolActive : toolBase}><div style={{ width: 14, height: 14, border: '2px solid currentColor', borderRadius: 2 }} /></button>
-        <button onClick={() => selectTool('signature')} title="서명" style={t === 'signature' ? toolActive : toolBase}><div style={{ width: 15, height: 2, borderBottom: '2px solid currentColor', transform: 'rotate(-8deg)' }} /></button>
-        <div style={{ flex: 1 }} />
-        <button onClick={() => docActions.undo()} disabled={!canUndo} title="실행 취소" style={!canUndo ? toolDisabled : toolBase}>
-          <span style={{ fontSize: 18, lineHeight: 1 }}>↩</span>
-        </button>
-        <button onClick={() => docActions.redo()} disabled={!canRedo} title="다시 실행" style={!canRedo ? toolDisabled : toolBase}>
-          <span style={{ fontSize: 18, lineHeight: 1 }}>↪</span>
-        </button>
+      <button onClick={p.onRetrySave} disabled={p.saveStatus !== 'error'} style={{ border: 0, borderRadius: 9999, height: 32, background: 'var(--pdfe-button-bg, transparent)', color: p.saveStatus === 'error' ? DANGER : TEXT_SUBTLE, fontSize: 13 }}>{p.hasUnappliedEdit ? '적용되지 않은 편집' : saveLabels[p.saveStatus]}</button>
+      <button className="pdfe-primary-button" disabled={p.isExporting} onClick={p.goExport} style={solidAccentBtn({ height: 32, borderRadius: 9999, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 })}><Download size={22} strokeWidth={1.5} />내보내기</button>
+    </header>
+    <div style={{ minHeight: TOOLBAR_H, flex: '0 0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '6px 20px', borderBottom: `1px solid ${BORDER}`, background: SURFACE }}>
+      <button style={toolBase} aria-label="전체 페이지 보기" title="전체 페이지 보기" onClick={() => void guarded(p.onOpenGridView)}><LayoutGrid size={22} strokeWidth={1.5} /></button>
+      <div className="pdfe-segmented" role="group" aria-label="편집 도구">
+        {(Object.keys(labels) as Tool[]).map(tool => {
+          const Icon = toolIcons[tool];
+          return <button key={tool} aria-label={labels[tool]} aria-pressed={p.activeTool === tool} title={labels[tool]} disabled={p.isExporting} style={{ ...(p.activeTool === tool ? toolActive : toolBase), flex: 1 }} onClick={() => void guarded(() => p.setActiveTool(tool))}>
+            <Icon size={22} strokeWidth={1.5} />
+          </button>;
+        })}
       </div>
-
-      {/* Format bar */}
-      <div style={formatRowStyle}>
-        <select value={fontToolFamily} onChange={onFontFamilyChange} onMouseDown={sel.preserveTextSelection} style={{ height: 30, border: `1px solid ${BORDER_STRONG}`, borderRadius: 6, background: SURFACE, fontSize: '12.5px', padding: '0 8px', fontFamily: 'inherit', color: TEXT, flex: '0 0 auto' }}>
-          {FONT_FAMILY_OPTIONS.map((fo) => <option key={fo.value} value={fo.value} style={{ fontFamily: fo.value }}>{fo.label}</option>)}
-        </select>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 0, flex: '0 0 auto' }}>
-          <button onClick={sizeDecClick} onMouseDown={sel.preserveTextSelection} style={{ width: 24, height: 30, border: `1px solid ${BORDER_STRONG}`, borderRight: 'none', borderRadius: '6px 0 0 6px', background: SURFACE, cursor: 'pointer', fontSize: 13, color: TEXT_MUTED }}>−</button>
-          <input type="text" inputMode="numeric" value={fontToolSizeInput} onChange={onFontSizeChange} onBlur={onFontSizeBlur} onMouseDown={sel.preserveTextSelection} style={{ width: 38, height: 30, border: `1px solid ${BORDER_STRONG}`, background: SURFACE, fontSize: '12.5px', padding: '0 4px', fontFamily: 'inherit', color: TEXT, textAlign: 'center' }} />
-          <button onClick={sizeIncClick} onMouseDown={sel.preserveTextSelection} style={{ width: 24, height: 30, border: `1px solid ${BORDER_STRONG}`, borderLeft: 'none', borderRadius: '0 6px 6px 0', background: SURFACE, cursor: 'pointer', fontSize: 13, color: TEXT_MUTED }}>+</button>
-        </div>
-        <span style={{ fontSize: '11.5px', color: TEXT_SUBTLE, flex: '0 0 auto' }}>px</span>
-        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
-        <button onClick={sel.applyBold} onMouseDown={sel.preserveTextSelection} title="굵게" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 800, color: TEXT }}>B</button>
-        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
-        <button onClick={() => sel.applyAlign('Left')} onMouseDown={sel.preserveTextSelection} title="왼쪽 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 15, height: 11, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div style={{ width: 15, height: 2, background: TEXT_MUTED }} /><div style={{ width: 10, height: 2, background: TEXT_MUTED }} /><div style={{ width: 13, height: 2, background: TEXT_MUTED }} />
-          </div>
-        </button>
-        <button onClick={() => sel.applyAlign('Center')} onMouseDown={sel.preserveTextSelection} title="가운데 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 15, height: 11, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ width: 15, height: 2, background: TEXT_MUTED }} /><div style={{ width: 9, height: 2, background: TEXT_MUTED }} /><div style={{ width: 12, height: 2, background: TEXT_MUTED }} />
-          </div>
-        </button>
-        <button onClick={() => sel.applyAlign('Right')} onMouseDown={sel.preserveTextSelection} title="오른쪽 정렬" style={{ width: 30, height: 30, flex: '0 0 auto', border: `1px solid ${BORDER_STRONG}`, background: SURFACE, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 15, height: 11, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-            <div style={{ width: 15, height: 2, background: TEXT_MUTED }} /><div style={{ width: 10, height: 2, background: TEXT_MUTED }} /><div style={{ width: 13, height: 2, background: TEXT_MUTED }} />
-          </div>
-        </button>
-        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
-        {COLOR_SWATCHES.map((hex) => (
-          <button key={hex} onClick={() => sel.applyColor(hex)} onMouseDown={sel.preserveTextSelection} title={hex} style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: '50%', border: `2px solid ${SURFACE}`, boxShadow: `0 0 0 1px ${BORDER}`, background: hex, cursor: 'pointer', padding: 0 }} />
-        ))}
-        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
-        {HIGHLIGHT_SWATCHES.map((hex) => (
-          <button key={hex} onClick={() => sel.applyHighlight(hex)} onMouseDown={sel.preserveTextSelection} title={`배경색 (${hex})`} style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 5, border: `2px solid ${SURFACE}`, boxShadow: `0 0 0 1px ${BORDER}`, background: hex, cursor: 'pointer', padding: 0 }} />
-        ))}
-        <button onClick={() => sel.applyHighlight('transparent')} onMouseDown={sel.preserveTextSelection} title="배경색 지우기" style={{ width: 20, height: 20, flex: '0 0 auto', borderRadius: 5, border: `1px solid ${BORDER}`, background: SURFACE, cursor: 'pointer', padding: 0, position: 'relative' }}>
-          <div style={{ position: 'absolute', left: 2, right: 2, top: '50%', height: 1.5, background: '#e0553d', transform: 'translateY(-50%) rotate(-45deg)' }} />
-        </button>
-        <div style={{ width: 1, height: 20, background: BORDER_SOFT, flex: '0 0 auto' }} />
-        <button onClick={applyFontToSelection} onMouseDown={sel.preserveTextSelection} style={applySelectionBtnStyle}>선택 적용</button>
-        <button onClick={applyFontToAll} onMouseDown={sel.preserveTextSelection} style={applyAllBtnStyle}>전체 적용</button>
-        {(gFam || gSize) && (
-          <button onClick={resetGlobalFont} style={{ height: 30, flex: '0 0 auto', whiteSpace: 'nowrap', border: 'none', background: 'none', color: TEXT_SUBTLE, borderRadius: 6, padding: '0 8px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>되돌리기</button>
-        )}
-      </div>
-
-      {/* Main area: rail + canvas */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        {/* Page rail */}
-        <div style={railPanelStyle}>
-          {railOpen ? (
-            <>
-              <div style={{ padding: '14px 14px 6px', fontSize: '11.5px', fontWeight: 700, color: TEXT_SUBTLE, letterSpacing: '.04em', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>페이지 ({pages.length})</span>
-                <button onClick={() => setRailOpen(false)} title="목록 접기" style={panelCollapseBtnStyle}>‹</button>
-              </div>
-              <div ref={railListRef} className="pdfe-scroll" style={railListStyle}>
-                {pages.map((p, i) => {
-                  const isActive = p.id === activePageId;
-                  const isPdf = p.kind === 'pdf';
-                  const rot = p.rotation || 0;
-                  const thumb = isPdf ? p.pdfThumb : undefined;
-                  return (
-                    <div
-                      key={p.id}
-                      id={`pdfe-thumb-${p.id}`}
-                      draggable
-                      data-page-id={p.id}
-                      onDragStart={onThumbDragStart}
-                      onDragOver={onThumbDragOver}
-                      onDrop={onThumbDrop}
-                      onClick={() => onThumbClick(p.id)}
-                      style={{ display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer' }}
-                    >
-                      <div
-                        data-page-id={p.id}
-                        onMouseEnter={(e) => setHoveredPageId((e.currentTarget as HTMLElement).dataset.pageId || null)}
-                        onMouseLeave={() => setHoveredPageId(null)}
-                        style={{
-                          width: '100%', height: RAIL_CARD_H, background: PAGE, borderRadius: 10, position: 'relative',
-                          border: isActive ? `2px solid ${ACCENT}` : `1px solid ${BORDER}`,
-                          boxShadow: isActive ? `0 0 0 3px color-mix(in srgb, ${ACCENT} 12%, transparent)` : 'none',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 8, overflow: 'hidden',
-                        }}
-                      >
-                        <div style={{ position: 'absolute', inset: 0, background: isPdf && thumb ? `${PAGE} url(${thumb}) no-repeat center / cover` : 'transparent', ...rotTransform(rot) }} />
-                        {!isPdf && <span style={{ position: 'relative', fontSize: '10.5px', color: '#9a9aa2', fontFamily: "'Noto Serif KR',serif" }}>{p.label}</span>}
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'rgba(20,28,42,.4)', opacity: hoveredPageId === p.id ? 1 : 0, transition: 'opacity .12s', borderRadius: 8, pointerEvents: hoveredPageId === p.id ? 'auto' : 'none' }}>
-                          <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onDuplicatePage(p.id); }} title="복제" style={{ width: 26, height: 26, borderRadius: '50%', background: PAGE, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)' }}>
-                            <div style={{ width: 11, height: 11, position: 'relative' }}>
-                              <div style={{ position: 'absolute', left: 0, top: 0, width: 8, height: 8, border: '1.5px solid #4a4a52', borderRadius: 1 }} />
-                              <div style={{ position: 'absolute', right: 0, bottom: 0, width: 8, height: 8, border: '1.5px solid #4a4a52', borderRadius: 1, background: PAGE }} />
-                            </div>
-                          </button>
-                           <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onRotatePage(p.id, 90); }} title="회전 (PDF 페이지만 지원)" style={{ width: 26, height: 26, borderRadius: '50%', background: PAGE, border: 'none', cursor: isPdf ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)', opacity: isPdf ? 1 : 0.4 }}>
-                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4a4a52" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                               <path d="M23 4v6h-6" />
-                               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                             </svg>
-                           </button>
-                          <button data-page-id={p.id} onClick={(e) => { e.stopPropagation(); onDeletePage(p.id); }} title="삭제" style={{ width: 26, height: 26, borderRadius: '50%', background: PAGE, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.25)', fontSize: 14, color: '#e0553d', lineHeight: 1 }}>×</button>
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'center', padding: '0 2px' }}>
-                        <span style={{ fontSize: '11.5px', color: TEXT_MUTED }}>{i + 1}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-                <button onClick={onAddPage} style={{ border: `1.5px dashed ${BORDER_STRONG}`, background: 'none', borderRadius: 8, padding: 14, fontSize: 12, color: TEXT_SUBTLE, cursor: 'pointer', fontFamily: 'inherit' }}>+ 페이지 추가</button>
-              </div>
-            </>
-          ) : (
-            <button onClick={() => setRailOpen(true)} title="페이지 목록 펼치기" style={panelExpandBtnStyle}>›</button>
-          )}
-        </div>
-
-        {/* Canvas scroll area */}
-        <div ref={scrollAreaRef} onMouseDown={onScrollAreaMouseDown} className="pdfe-scroll" style={scrollAreaStyle}>
-          <div style={pageOuterStyle}>
-            <div
-              ref={pageWrapRef as React.RefObject<HTMLDivElement>}
-              style={pageWrapStyle}
-              onClick={onPageClick}
-            >
-              {/* PDF page */}
-              {activePageIsPdf && (
-                <>
-                  {activePagePending && (
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, background: '#fff' }}>
-                      <div style={spinnerAccentStyle(26, 3)} />
-                      <div style={{ fontSize: '12.5px', color: '#7a7a82' }}>이 페이지를 여는 중…</div>
-                    </div>
-                  )}
-                  {activePageTextPending && (
-                    <div style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid #ededed', borderRadius: 20, padding: '5px 10px', boxShadow: '0 2px 8px rgba(20,30,45,.1)', zIndex: 5 }}>
-                      <div style={spinnerAccentStyle(12, 2)} />
-                      <span style={{ fontSize: 11, color: '#6b6b72' }}>텍스트 인식 중…</span>
-                    </div>
-                  )}
-                  <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, pointerEvents: 'none', backgroundImage: activePage.pdfImage ? `url(${activePage.pdfImage})` : 'none', backgroundSize: 'contain', backgroundRepeat: 'no-repeat' }} />
-                  {(activePage.textItems || []).map((ti) => {
-                    const fontSizePx = gSize || ti.fontSizePx || Math.max(9, ti.height * 0.85);
-                    const lineH = Math.round(fontSizePx * 1.35);
-                    return (
-                      <div
-                        key={ti.id}
-                        contentEditable={isTextEditable}
-                        suppressContentEditableWarning
-                        onClick={stopProp}
-                        onBlur={(e) => docActions.updateTextItem(activePageId, ti.id, e.currentTarget.innerHTML)}
-                        style={{
-                          position: 'absolute', left: ti.left, top: ti.top, width: ti.width, minHeight: ti.height,
-                          fontSize: fontSizePx, lineHeight: lineH + 'px', background: 'transparent', color: '#161616',
-                          fontFamily: gFam || "'Pretendard',sans-serif", whiteSpace: 'pre-wrap', wordBreak: 'keep-all', overflowWrap: 'break-word', overflow: 'visible',
-                          cursor: textLayerInteractive ? 'text' : 'default', pointerEvents: textLayerInteractive ? 'auto' : 'none',
-                        }}
-                        dangerouslySetInnerHTML={{ __html: ti.text }}
-                      />
-                    );
-                  })}
-                </>
-              )}
-
-              {/* Doc page blocks */}
-              {activePage.blocks.map((b) => {
-                if (b.type === 'title') {
-                  return (
-                    <div
-                      key={b.id} contentEditable={isTextEditable} suppressContentEditableWarning
-                      onBlur={(e) => docActions.updateBlock(activePageId, b.id, 'text', e.currentTarget.innerHTML)}
-                      style={{ fontSize: gSize ? gSize + 'px' : '24px', fontWeight: 700, textAlign: 'center', marginBottom: 28, letterSpacing: '.04em', fontFamily: gFam || undefined }}
-                      dangerouslySetInnerHTML={{ __html: b.text }}
-                    />
-                  );
-                }
-                if (b.type === 'text') {
-                  return (
-                    <div
-                      key={b.id} contentEditable={isTextEditable} suppressContentEditableWarning
-                      onBlur={(e) => docActions.updateBlock(activePageId, b.id, 'text', e.currentTarget.innerHTML)}
-                      style={{ fontSize: gSize ? gSize + 'px' : '14.5px', lineHeight: 1.9, marginBottom: 16, fontFamily: gFam || undefined }}
-                      dangerouslySetInnerHTML={{ __html: b.text }}
-                    />
-                  );
-                }
-                if (b.type === 'clause') {
-                  return (
-                    <div key={b.id} style={{ marginBottom: 16 }}>
-                      <div
-                        contentEditable={isTextEditable} suppressContentEditableWarning
-                        onBlur={(e) => docActions.updateBlock(activePageId, b.id, 'label', e.currentTarget.innerHTML)}
-                        style={{ fontSize: gSize ? gSize + 'px' : '14.5px', fontWeight: 700, marginBottom: 4, fontFamily: gFam || undefined }}
-                        dangerouslySetInnerHTML={{ __html: b.label }}
-                      />
-                      <div
-                        contentEditable={isTextEditable} suppressContentEditableWarning
-                        onBlur={(e) => docActions.updateBlock(activePageId, b.id, 'text', e.currentTarget.innerHTML)}
-                        style={{ fontSize: gSize ? gSize + 'px' : '14.5px', lineHeight: 1.9, fontFamily: gFam || undefined }}
-                        dangerouslySetInnerHTML={{ __html: b.text }}
-                      />
-                    </div>
-                  );
-                }
-                if (b.type === 'party') {
-                  const sig = signatures[b.which];
-                  return (
-                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, padding: '16px 0', borderTop: `1px solid ${BORDER}` }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{b.role}</div>
-                        <div
-                          contentEditable={isTextEditable} suppressContentEditableWarning
-                          onBlur={(e) => docActions.updateBlock(activePageId, b.id, 'name', e.currentTarget.innerHTML)}
-                          style={{ fontSize: gSize ? gSize + 'px' : '13.5px', color: '#4a4a52', fontFamily: gFam || undefined }}
-                          dangerouslySetInnerHTML={{ __html: b.name }}
-                        />
-                      </div>
-                      <div data-sig-which={b.which} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'fixed', which: b.which }); }} style={{ width: 170, height: 56, flex: '0 0 170px' }}>
-                        {sig.signed ? (
-                          <div style={{ width: '100%', height: '100%', border: '1px solid #16a34a', borderRadius: 6, background: sig.dataUrl ? `transparent url(${sig.dataUrl}) no-repeat center / contain` : 'transparent', cursor: 'pointer' }} />
-                        ) : (
-                          <div style={{ width: '100%', height: '100%', border: '1.5px dashed var(--accent, #3d5afe)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',sans-serif", fontSize: '11.5px', color: ACCENT, cursor: 'pointer', background: '#fcfcfd' }}>클릭하여 서명</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-                return null;
-              })}
-
-              {/* Images */}
-              {activePage.images.map((im) => (
-                <div key={im.id} data-page-id={activePageId} data-item-id={im.id} className="pdfe-overlay-item" onMouseDown={pointer.onImageMouseDown} onClick={stopProp} style={{ position: 'absolute', left: im.x, top: im.y, width: im.w, height: im.h, overflow: 'visible', cursor: 'grab' }}>
-                  <div style={{ width: '100%', height: '100%', border: '1px solid #d7d7dd', borderRadius: 4, background: 'repeating-linear-gradient(135deg, #ececec 0 8px, #eef0f3 8px 16px)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',monospace", fontSize: 11, color: '#6b6b72', position: 'relative', pointerEvents: 'none' }}>
-                    이미지 placeholder
-                  </div>
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={im.id} onClick={(e) => { e.stopPropagation(); docActions.deleteImage(activePageId, im.id); showToast('이미지를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 20, height: 20, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
-                </div>
-              ))}
-
-              {/* Signature fields */}
-              {activePage.signatureFields.map((f) => (
-                <div key={f.id} data-page-id={activePageId} data-item-id={f.id} className="pdfe-overlay-item" onMouseDown={pointer.onSigFieldMouseDown} onClick={stopProp} style={{ position: 'absolute', left: f.x, top: f.y, width: f.w, height: f.h, overflow: 'visible', cursor: 'grab' }}>
-                  {f.signed ? (
-                    <div data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'extra', pageId: activePageId, id: f.id }); }} style={{ width: '100%', height: '100%', border: '1px solid #16a34a', borderRadius: 6, background: f.dataUrl ? `transparent url(${f.dataUrl}) no-repeat center / contain` : 'transparent', cursor: 'pointer' }} />
-                  ) : (
-                    <div data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); onOpenSigModal({ kind: 'extra', pageId: activePageId, id: f.id }); }} style={{ width: '100%', height: '100%', border: '1.5px dashed var(--accent, #3d5afe)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard',sans-serif", fontSize: '11.5px', color: ACCENT, cursor: 'pointer', background: '#fff' }}>서명 필드 · 클릭</div>
-                  )}
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={f.id} onClick={(e) => { e.stopPropagation(); docActions.deleteSigField(activePageId, f.id); showToast('서명 필드를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 20, height: 20, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 12, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
-                </div>
-              ))}
-
-              {/* Shapes */}
-              {activePage.shapes.map((sh) => (
-                <div key={sh.id} data-page-id={activePageId} data-item-id={sh.id} className="pdfe-overlay-item" onMouseDown={pointer.onShapeMouseDown} onClick={stopProp} style={{ position: 'absolute', left: sh.x, top: sh.y, width: sh.w, height: sh.h, border: `2px solid ${ACCENT}`, borderRadius: 4, background: 'color-mix(in srgb, var(--accent) 6%, transparent)', cursor: 'grab' }}>
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={sh.id} onClick={(e) => { e.stopPropagation(); docActions.deleteShape(activePageId, sh.id); showToast('도형을 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 11, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
-                </div>
-              ))}
-
-              {/* Text boxes */}
-              {activePage.textBoxes.map((tb) => (
-                <div key={tb.id} className="pdfe-overlay-item" onClick={stopProp} style={{ position: 'absolute', left: tb.x, top: tb.y, width: tb.w, height: tb.h, overflow: 'visible' }}>
-                  <div
-                    contentEditable suppressContentEditableWarning
-                    onBlur={(e) => docActions.updateTextBoxText(activePageId, tb.id, e.currentTarget.innerHTML)}
-                    style={{ width: '100%', height: '100%', background: '#fff', border: '1px solid #d7d7dd', borderRadius: 4, padding: '6px 8px', fontFamily: gFam || "'Pretendard',sans-serif", fontSize: (gSize || 13.5) + 'px', lineHeight: 1.5, outline: 'none', overflow: 'auto' }}
-                    dangerouslySetInnerHTML={{ __html: tb.text }}
-                  />
-                  {!isExporting && (
-                    <button data-page-id={activePageId} data-item-id={tb.id} onMouseDown={pointer.onTextBoxMouseDown} title="이동" className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, left: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,.15)', padding: 0 }}>
-                      <div style={{ width: 8, height: 8, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
-                        <div style={{ width: 2, height: 2, borderRadius: '50%', background: '#7a7a82' }} />
-                      </div>
-                    </button>
-                  )}
-                  {!isExporting && <button data-page-id={activePageId} data-item-id={tb.id} onClick={(e) => { e.stopPropagation(); docActions.deleteTextBox(activePageId, tb.id); showToast('텍스트 박스를 삭제했습니다'); }} onMouseDown={stopProp} className="pdfe-overlay-btn" style={{ position: 'absolute', top: -9, right: -9, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: '1px solid #d7d7dd', cursor: 'pointer', fontSize: 11, lineHeight: 1, color: '#6b6b72', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}>×</button>}
-                </div>
-              ))}
-
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom nav bar */}
-      <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 16, boxShadow: '0 8px 28px rgba(20,30,45,.16)', display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', zIndex: 30, fontFamily: "'Pretendard',sans-serif" }}>
-        <button onClick={prevPage} disabled={activeIndex <= 0} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 16, color: TEXT_MUTED }}>‹</button>
-        <input value={pageNumInput} onChange={onPageNumChange} onBlur={onPageNumCommit} onKeyDown={onPageNumKeyDown} style={{ width: 34, height: 28, textAlign: 'center', border: `1px solid ${BORDER}`, borderRadius: 8, fontSize: '12.5px', fontFamily: 'inherit', background: 'transparent', color: 'inherit' }} />
-        <span style={{ fontSize: 12, color: TEXT_SUBTLE, padding: '0 2px', whiteSpace: 'nowrap' }}>/ {pages.length}</span>
-        <button onClick={nextPage} disabled={activeIndex >= pages.length - 1} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 16, color: TEXT_MUTED }}>›</button>
-        <div style={{ width: 1, height: 20, background: BORDER_SOFT, margin: '0 4px' }} />
-        <button onClick={zoomOut} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15, color: TEXT_MUTED }}>−</button>
-        <span style={{ fontSize: 12, color: TEXT_MUTED, width: 42, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button onClick={zoomIn} style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15, color: TEXT_MUTED }}>+</button>
-        <div style={{ width: 1, height: 20, background: BORDER_SOFT, margin: '0 4px' }} />
-        <button onClick={fitToWidth} title="폭 맞춤" style={{ width: 28, height: 28, border: 'none', background: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, color: TEXT_MUTED }}>⇔</button>
-      </div>
+      {p.activeTool === 'select' && <button aria-pressed={multiSelect} disabled={!editable} style={{ ...(multiSelect ? toolActive : toolBase), width: 'auto', padding: '0 12px', border: `1px solid ${multiSelect ? TEXT : BORDER}` }} onClick={() => setMultiSelect(value => !value)}>여러 줄 선택</button>}
+      <div style={{ flex: 1 }} /><button style={toolBase} disabled={!p.canUndo || p.isExporting} onClick={() => undo(false)} aria-label="실행 취소" title="실행 취소"><Undo2 size={22} strokeWidth={1.5} /></button><button style={toolBase} disabled={!p.canRedo || p.isExporting} onClick={() => undo(true)} aria-label="다시 실행" title="다시 실행"><Redo2 size={22} strokeWidth={1.5} /></button>
     </div>
-  );
+    {p.activeTool === 'select' && sourceSelections.length > 0 && <div className="pdfe-selection-row" style={{ display: 'flex', alignItems: 'center', padding: '6px 20px', borderBottom: `1px solid ${BORDER}`, background: SURFACE, gap: 8 }}>
+      <span role="status" aria-live="polite">{sourceSelections.length}개 선택</span>
+      {sourceSelections.length >= 2 && <button style={{ borderRadius: 9999 }} disabled={!editable || sourceSelections.some(target => !target.editable)} onClick={() => void groupSelection()}>묶어서 편집</button>}
+      {selection && engine.info?.canCopy && <button title="텍스트 복사" onClick={() => void copy()}>복사</button>}
+    </div>}
+    {engine.info?.hasSignatures && <div role="note" style={{ padding: '6px 18px', fontSize: 12 }}>수정한 PDF는 기존 인증서 서명이 유효하지 않을 수 있습니다. 복제본은 원본 태그 구조의 의미를 유지하지 않습니다.</div>}
+    <div className="pdfe-editor-workspace" style={{ position: 'relative', flex: 1, display: 'flex', minHeight: 0 }}>
+      <aside style={{ width: railOpen ? 176 : 32, flexShrink: 0, borderRight: `1px solid ${BORDER}`, background: SURFACE, display: 'flex', flexDirection: 'column' }}>
+        <button aria-label={railOpen ? '페이지 목록 접기' : '페이지 목록 펼치기'} onClick={() => setRailOpen(!railOpen)} style={{ flexShrink: 0, border: 0, background: 'var(--pdfe-button-bg, transparent)', padding: '12px 4px', color: 'var(--pdfe-button-color, var(--pdfe-text-subtle))', fontSize: 13, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>{railOpen && `페이지 (${workspace.pages.length})`}{railOpen ? <ChevronLeft size={22} strokeWidth={1.5} /> : <ChevronRight size={22} strokeWidth={1.5} />}</button>
+        {railOpen && <div className="pdfe-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14 }}>
+          {workspace.pages.map((item, i) => {
+            const capability = item.kind === 'pdf' ? engine.info?.pages[item.sourcePageIndex]?.duplicate : undefined;
+            return <div key={item.id} className="pdfe-page-card" data-selected={item.id === page.id} draggable={assemble} onDragStart={() => { draggingThumb.current = item.id; }} onDragOver={e => { if (assemble) e.preventDefault(); }} onDrop={e => { e.preventDefault(); if (assemble && draggingThumb.current) p.onReorderPages(draggingThumb.current, item.id); draggingThumb.current = null; }} style={{ marginBottom: 14 }}>
+              <div style={{ height: RAIL_CARD_H, padding: 8, position: 'relative', background: '#fff', borderRadius: 10, border: `${item.id === page.id ? 2 : 1}px solid ${item.id === page.id ? ACCENT : BORDER}` }}>
+                <PageThumbnail page={item} engine={engine} revision={p.revision} />
+                <button className="pdfe-thumb-hit" aria-label={`${i + 1} 페이지 열기`} onClick={() => p.onThumbClick(item.id)} />
+                <div className="pdfe-page-controls"><button disabled={!assemble || capability?.allowed === false} title={capability?.allowed === false ? capability.reason : '복제'} onClick={() => p.onDuplicatePage(item.id)}>복제</button><button disabled={!assemble} onClick={() => p.onRotatePage(item.id, 90)}>회전</button><button disabled={!assemble || workspace.pages.length === 1} onClick={() => p.onDeletePage(item.id)}>삭제</button></div>
+              </div><div style={{ textAlign: 'center', fontSize: 12, marginTop: 5 }}>{i + 1}</div>
+            </div>;
+          })}<button disabled={!assemble} onClick={p.onAddPage} style={{ width: '100%', border: `1px solid ${BORDER_STRONG}`, borderRadius: 9999, padding: '6px 12px', background: 'var(--pdfe-button-bg, var(--pdfe-surface))', color: 'var(--pdfe-button-color, var(--pdfe-text-subtle))', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}><Plus size={22} strokeWidth={1.5} />페이지 추가</button>
+        </div>}
+      </aside>
+      <div ref={scrollRef} className="pdfe-scroll" style={{ flex: 1, minWidth: 0, overflow: 'auto', background: CANVAS_BG, padding: '40px 30px 90px' }}>
+        {renderError && <div role="alert">{renderError} <button onClick={() => void engine.retry().catch(e => p.showToast(String(e)))}>다시 시도</button></div>}
+        <div style={{ width: 'max-content', margin: '0 auto' }}>{render ? <PdfPageSurface page={page} render={render} zoom={p.zoom} tool={p.activeTool} disabled={!editable || !!edit} scrollRef={scrollRef} selectedIds={sourceSelections.flatMap(target => target.lineIds)} multiSelect={multiSelect} onSelect={(target, additive) => void choose(target, false, additive)} onEdit={target => { if (sourceSelections.length <= 1) void choose(target, true); }} onClearSelection={() => { if (!p.isExporting && !edit) clearSelection(); }} /> : <div role="status">페이지를 여는 중…</div>}</div>
+      </div>
+      {edit && <TextEditPanel key={`${page.id}:${JSON.stringify(edit.target.lineIds)}:${edit.revision}`} page={page} target={edit.target} sourceFonts={edit.fonts} fontAssets={workspace.fontAssets} downloadFont={engine.downloadFont} requiresCommit={edit.requiresCommit} baseRevision={edit.revision} validate={engine.validate} getRevision={() => p.getDocumentState().revision} onCommit={commit} onCancel={cancel} onPreview={preview} onDirtyChange={dirty} registerController={registerPanel} showToast={p.showToast} disabled={p.isExporting} />}
+    </div>
+    <nav className="pdfe-bottom-nav" style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 24, boxShadow: PANEL_SHADOW, display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', zIndex: 30 }}>
+      <button aria-label="이전 페이지" disabled={index === 0 || p.isExporting} onClick={() => p.goToPageIndex(index - 1)}><ChevronLeft size={22} strokeWidth={1.5} /></button><input aria-label="현재 페이지" value={p.pageNumInput} onChange={e => p.setPageNumInput(e.target.value)} onBlur={commitPageNumber} onKeyDown={e => { if (e.key === 'Enter') commitPageNumber(); }} style={{ width: 36, textAlign: 'center' }} /><span>/ {workspace.pages.length}</span><button aria-label="다음 페이지" disabled={index === workspace.pages.length - 1 || p.isExporting} onClick={() => p.goToPageIndex(index + 1)}><ChevronRight size={22} strokeWidth={1.5} /></button>
+      <button aria-label="축소" onClick={() => p.setZoom(Math.max(.25, p.zoom - .25))}><Minus size={22} strokeWidth={1.5} /></button><span>{Math.round(p.zoom * 100)}%</span><button aria-label="확대" onClick={() => p.setZoom(Math.min(4, p.zoom + .25))}><Plus size={22} strokeWidth={1.5} /></button>
+      <button aria-label="폭 맞춤" title="폭 맞춤" onClick={() => { if (render && scrollRef.current) p.setZoom((scrollRef.current.clientWidth - 60) / ((render.displayBounds[2] - render.displayBounds[0]) * 96 / 72)); }}><ArrowLeftRight size={22} strokeWidth={1.5} /></button>
+    </nav>
+  </div>;
 }

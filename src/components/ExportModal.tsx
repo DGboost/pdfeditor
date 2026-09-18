@@ -1,4 +1,5 @@
-import { ACCENT, BORDER, SURFACE, TEXT_MUTED, TEXT_SUBTLE, BORDER_SOFT, solidAccentBtn } from '../styles/theme';
+import { X } from 'lucide-react';
+import { BORDER, SURFACE, TEXT_MUTED, BORDER_SOFT, FONT_STACK, PANEL_SHADOW, solidAccentBtn, toolBase, fmtBase, fmtActive } from '../styles/theme';
 import type { ExportSettings, ExportFormat } from '../types/pdfEditor';
 
 export interface ExportModalProps {
@@ -11,44 +12,41 @@ export interface ExportModalProps {
   onSaveToArchive: () => void;
 }
 
-const fmtBase: React.CSSProperties = { flex: 1, border: `1px solid ${BORDER}`, background: SURFACE, borderRadius: '7px', padding: '10px 4px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Pretendard',sans-serif", color: TEXT_MUTED };
 
 export function ExportModal({ open, exportSettings, setExportSettings, isExporting, onClose, onDownload, onSaveToArchive }: ExportModalProps) {
   if (!open) return null;
-  const fmtActive: React.CSSProperties = { ...fmtBase, background: ACCENT, color: '#fff', border: `1px solid ${ACCENT}` };
 
   const setFormat = (format: ExportFormat) => setExportSettings((s) => ({ ...s, format }));
   const isPdf = exportSettings.format === 'pdf';
 
-  const onAction = () => (isPdf ? onDownload() : onSaveToArchive());
-  const actionBtnStyle: React.CSSProperties = isPdf && isExporting
-    ? { width: '100%', background: BORDER_SOFT, color: TEXT_SUBTLE, border: 'none', borderRadius: '9px', padding: '12px', fontSize: '13.5px', fontWeight: 700, cursor: 'not-allowed', fontFamily: "'Pretendard',sans-serif" }
-    : { ...solidAccentBtn({ padding: '12px', fontSize: '13.5px', borderRadius: '9px' }), width: '100%' };
-  const actionLabel = isPdf ? (isExporting ? '내보내는 중…' : 'PDF 다운로드') : '보관함에 저장';
+  const onAction = () => { if (!isExporting) { if (isPdf) onDownload(); else onSaveToArchive(); } };
+  const actionBtnStyle: React.CSSProperties = { ...solidAccentBtn({ padding: 12, fontSize: 14, borderRadius: 8 }), width: '100%', opacity: isExporting ? .5 : 1, cursor: isExporting ? 'not-allowed' : 'pointer' };
+  const actionLabel = isExporting ? (isPdf ? '내보내는 중…' : '저장 중…') : (isPdf ? 'PDF 다운로드' : '보관함에 저장');
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(20,25,35,.45)', zIndex: 55, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'pdfe-pop .12s ease-out' }}
-      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 55, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={() => { if (!isExporting) onClose(); }}
     >
       <div
-        style={{ background: SURFACE, borderRadius: 14, padding: 24, width: 420, maxWidth: '92vw', boxShadow: '0 20px 60px rgba(0,0,0,.25)', fontFamily: "'Pretendard',sans-serif" }}
+        role="dialog" aria-modal="true" aria-label="내보내기" className="pdfe-panel-enter"
+        style={{ background: SURFACE, border: `1px solid ${BORDER_SOFT}`, borderRadius: 24, padding: 20, width: 420, maxWidth: '100%', maxHeight: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: PANEL_SHADOW, fontFamily: FONT_STACK }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>내보내기</h2>
-          <button onClick={onClose} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: TEXT_SUBTLE, lineHeight: 1, padding: 4 }}>×</button>
+        <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 500, margin: 0 }}>내보내기</h2>
+          <button disabled={isExporting} onClick={onClose} aria-label="닫기" style={toolBase}><X size={24} strokeWidth={1.5} /></button>
         </div>
 
-        <div style={{ background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 10, padding: '15px 16px', marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>내보내기 형식</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setFormat('pdf')} style={exportSettings.format === 'pdf' ? fmtActive : fmtBase}>PDF</button>
-            <button onClick={() => setFormat('archive')} style={exportSettings.format === 'archive' ? fmtActive : fmtBase}>보관함 저장</button>
+        <div className="pdfe-scroll" style={{ minHeight: 0, overflowY: 'auto', marginBottom: 20 }}>
+          <div style={{ fontSize: 14, color: TEXT_MUTED, marginBottom: 12 }}>내보내기 형식</div>
+          <div style={{ display: 'flex', gap: 4, padding: 4, background: 'var(--pdfe-selected, #f3f4f6)', border: `1px solid ${BORDER}`, borderRadius: 999 }}>
+            <button disabled={isExporting} aria-pressed={exportSettings.format === 'pdf'} onClick={() => setFormat('pdf')} style={exportSettings.format === 'pdf' ? fmtActive : fmtBase}>PDF</button>
+            <button disabled={isExporting} aria-pressed={exportSettings.format === 'archive'} onClick={() => setFormat('archive')} style={exportSettings.format === 'archive' ? fmtActive : fmtBase}>보관함 저장</button>
           </div>
         </div>
 
-        <button onClick={onAction} disabled={isPdf && isExporting} style={actionBtnStyle}>{actionLabel}</button>
+        <button className="pdfe-primary-button" onClick={onAction} disabled={isExporting} style={{ ...actionBtnStyle, flexShrink: 0 }}>{actionLabel}</button>
       </div>
     </div>
   );

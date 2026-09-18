@@ -8,12 +8,13 @@
     "dev": "vite --port 3000",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 3000",
-    "start": "vite --port 3000"
+    "start": "vite --port 3000",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "html2canvas": "1.4.1",
-    "jspdf": "2.5.1",
-    "pdfjs-dist": "3.11.174",
+    "@noble/hashes": "2.0.1",
+    "lucide-react": "1.47.0",
+    "mupdf": "1.28.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -21,6 +22,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "tsx": "4.23.13",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   }
