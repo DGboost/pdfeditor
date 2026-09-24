@@ -35,3 +35,4 @@
 - Distinguish advisory DOCX read-only recommendations from enforced protection, including bare protection elements and foreign-namespace attributes. Exclude attached-template relationships from external-media warnings; retain warnings for images and unknown external types.
 - Cache DOCX selection formatting against native state and revision, coalesce page measurements, and avoid duplicate export-error notifications.
 - Preserve fractional PPTX text and table font sizes through import/export. Fetch only needed history records and cache immutable media hashes without revoking undo-restorable URLs; release cancelled slideshow animation and laser-pointer listeners.
+- Keep `vendor/` out of git; `npm run vendor:fetch` rebuilds it from the pinned, SHA-256-verified upstream archives plus `vendor-patches/<engine>.patch`, which carry the local SuperDoc, rhwp, and PPTist modifications.

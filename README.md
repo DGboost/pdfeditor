@@ -9,6 +9,7 @@ PDF, DOCX, HWP, HWPX, PPTX를 같은 파일 선택 화면과 공통 헤더에서
 Node.js **22.12 이상**(검증 환경 22.22.3), npm, pnpm **10.25.0**, Rust와 `wasm32-unknown-unknown` target, wasm-pack **0.15.0**이 필요합니다. Rust 1.96.0으로 검증했습니다. 처음에는 각 독립 프로젝트의 고정 lockfile로 설치합니다.
 
 ```sh
+npm run vendor:fetch
 npm ci
 CI=1 HUSKY=0 pnpm --dir vendor/superdoc install --frozen-lockfile
 CI=1 HUSKY=0 npm --prefix engines/docx ci
@@ -18,6 +19,8 @@ rustup target add wasm32-unknown-unknown
 npm run engines:build
 npm run dev -- --host 127.0.0.1
 ```
+
+`vendor/`는 git에 포함하지 않습니다. `vendor:fetch`는 각 엔진의 고정 upstream archive를 내려받아 SHA-256을 확인하고 `vendor-patches/<엔진>.patch`를 적용해 `vendor/superdoc`, `vendor/rhwp`, `vendor/pptist`를 만듭니다. 이미 있는 디렉터리는 건너뜁니다. `vendor/` 소스를 수정했다면 upstream archive 대비 patch를 다시 생성해 `vendor-patches/`에 커밋하세요.
 
 ```sh
 npm test

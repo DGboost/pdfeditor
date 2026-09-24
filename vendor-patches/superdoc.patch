@@ -1,0 +1,2533 @@
+diff --git a/packages/layout-engine/contracts/src/index.ts b/packages/layout-engine/contracts/src/index.ts
+index ae60be84c2a902d45fe9dbf0ec45739e767ec3da..29b61914a5862a40d0588f58e232cea8b905b6b8 100644
+--- a/packages/layout-engine/contracts/src/index.ts
++++ b/packages/layout-engine/contracts/src/index.ts
+@@ -2009,6 +2009,8 @@ export type Line = {
+   naturalWidth?: number;
+   /** Number of spaces in the line (pre-computed for efficiency in justify calculations). */
+   spaceCount?: number;
++  /** True only when this measured line was terminated by an explicit soft line break. */
++  endsWithLineBreak?: boolean;
+   /** True when this line used author-defined OOXML tab stops, not synthesized default stops. */
+   hasExplicitTabStops?: boolean;
+   segments?: LineSegment[];
+diff --git a/packages/layout-engine/contracts/src/justify-utils.test.ts b/packages/layout-engine/contracts/src/justify-utils.test.ts
+index f21d96484b3842293c36a0ea9a420ebf5fe940a6..6ae1ca15982697eedcca7847ed593044b0b85c84 100644
+--- a/packages/layout-engine/contracts/src/justify-utils.test.ts
++++ b/packages/layout-engine/contracts/src/justify-utils.test.ts
+@@ -29,7 +29,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'justify',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(true);
+   });
+@@ -39,7 +38,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'left',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+   });
+@@ -49,7 +47,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'center',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+   });
+@@ -59,7 +56,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'right',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+   });
+@@ -69,7 +65,6 @@ describe('shouldApplyJustify', () => {
+       alignment: undefined,
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+   });
+@@ -79,7 +74,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'both',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(true);
+   });
+@@ -89,19 +83,18 @@ describe('shouldApplyJustify', () => {
+       alignment: 'justify',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: true,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+   });
+ 
+-  it('returns true for last line with soft break (Shift+Enter)', () => {
++  it('returns false for an internal soft-break-ended line (Shift+Enter)', () => {
+     const params: ShouldApplyJustifyParams = {
+       alignment: 'justify',
+       hasExplicitPositioning: false,
+-      isLastLineOfParagraph: true,
+-      paragraphEndsWithLineBreak: true,
++      isLastLineOfParagraph: false,
++      lineEndsWithLineBreak: true,
+     };
+-    expect(shouldApplyJustify(params)).toBe(true);
++    expect(shouldApplyJustify(params)).toBe(false);
+   });
+ 
+   it('returns false when legacy hasExplicitPositioning is true', () => {
+@@ -109,7 +102,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'justify',
+       hasExplicitPositioning: true,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+   });
+@@ -120,7 +112,6 @@ describe('shouldApplyJustify', () => {
+       hasExplicitPositioning: true,
+       hasExplicitTabStops: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(true);
+   });
+@@ -131,7 +122,6 @@ describe('shouldApplyJustify', () => {
+       hasExplicitPositioning: false,
+       hasExplicitTabStops: true,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+   });
+@@ -141,7 +131,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'justify',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+       skipJustifyOverride: true,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+@@ -152,7 +141,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'justify',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+       skipJustifyOverride: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(true);
+@@ -163,7 +151,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'justify',
+       hasExplicitPositioning: false,
+       isLastLineOfParagraph: false,
+-      paragraphEndsWithLineBreak: false,
+     };
+     expect(shouldApplyJustify(params)).toBe(true);
+   });
+@@ -173,7 +160,6 @@ describe('shouldApplyJustify', () => {
+       alignment: 'justify',
+       hasExplicitPositioning: true,
+       isLastLineOfParagraph: true,
+-      paragraphEndsWithLineBreak: false,
+       skipJustifyOverride: true,
+     };
+     expect(shouldApplyJustify(params)).toBe(false);
+diff --git a/packages/layout-engine/contracts/src/justify-utils.ts b/packages/layout-engine/contracts/src/justify-utils.ts
+index fe9e8b40950bd1cec5f810b315e00defa20b78b3..004003f784b1e3adc1d4a89d9a826081152fee46 100644
+--- a/packages/layout-engine/contracts/src/justify-utils.ts
++++ b/packages/layout-engine/contracts/src/justify-utils.ts
+@@ -24,8 +24,8 @@ export type ShouldApplyJustifyParams = {
+   hasExplicitTabStops?: boolean;
+   /** Whether this is the last line of the paragraph. */
+   isLastLineOfParagraph: boolean;
+-  /** Whether the paragraph ends with a soft break (Shift+Enter / LineBreak run). */
+-  paragraphEndsWithLineBreak: boolean;
++  /** Whether this specific line ends at an explicit soft break, including internal breaks. */
++  lineEndsWithLineBreak?: boolean;
+   /** Explicit override to skip justify (e.g., from rendering context). */
+   skipJustifyOverride?: boolean;
+ };
+@@ -37,13 +37,12 @@ export type ShouldApplyJustifyParams = {
+  * - Alignment is 'justify'
+  * - No explicit skip override
+  * - Line doesn't have author-defined tab stops
+- * - Line is NOT the last line, OR paragraph ends with a soft break
++ * - Line is neither explicitly soft-break-ended nor the true last line
+  *
+- * This matches Microsoft Word's behavior:
+- * - All lines are justified except the true last line
+- * - Soft breaks (Shift+Enter) do NOT count as "last line"
+- * - Explicit tab-aligned text is never justified
+- * - Default/manual tab-aligned text can still be justified
++ * The editor preserves natural spacing on Shift+Enter lines regardless of the
++ * source document's compatibility settings. Automatically wrapped lines remain
++ * justified. Explicit tab-aligned text is never justified; default/manual tabs
++ * can still be justified.
+  *
+  * @param params - Parameters for justify decision
+  * @returns true if justify should be applied, false otherwise
+@@ -54,7 +53,7 @@ export function shouldApplyJustify(params: ShouldApplyJustifyParams): boolean {
+     hasExplicitPositioning,
+     hasExplicitTabStops,
+     isLastLineOfParagraph,
+-    paragraphEndsWithLineBreak,
++    lineEndsWithLineBreak,
+     skipJustifyOverride,
+   } = params;
+   const lineHasExplicitTabStops = hasExplicitTabStops ?? hasExplicitPositioning ?? false;
+@@ -70,13 +69,17 @@ export function shouldApplyJustify(params: ShouldApplyJustifyParams): boolean {
+     return false;
+   }
+ 
++  if (lineEndsWithLineBreak === true) {
++    return false;
++  }
++
+   // Author-defined tab stops control horizontal positioning and should not be stretched.
+   if (lineHasExplicitTabStops) {
+     return false;
+   }
+ 
+-  // Skip justify on the true last line (but NOT if it ends with a soft break)
+-  if (isLastLineOfParagraph && !paragraphEndsWithLineBreak) {
++  // The true last line also retains natural spacing.
++  if (isLastLineOfParagraph) {
+     return false;
+   }
+ 
+diff --git a/packages/layout-engine/layout-bridge/src/remeasure.ts b/packages/layout-engine/layout-bridge/src/remeasure.ts
+index 299477ffa7809af119984052c33266f9cf9167c7..0691ebdff8a281a4b904e86ee5cb0af72f61b4ca 100644
+--- a/packages/layout-engine/layout-bridge/src/remeasure.ts
++++ b/packages/layout-engine/layout-bridge/src/remeasure.ts
+@@ -1583,6 +1583,7 @@ export function remeasureParagraph(
+       descent: 0,
+       lineHeight: Math.max(lineHeightForRuns(runs, startRun, endRun, lastMeasuredFontSize), lineMaxAtomicHeight),
+       maxWidth: effectiveMaxWidth,
++      ...(explicitLineBreakRun >= 0 ? { endsWithLineBreak: true } : {}),
+       ...(lineMaxAtomicHeight > 0 ? { maxImageHeight: lineMaxAtomicHeight } : {}),
+     };
+     lines.push(line);
+diff --git a/packages/layout-engine/layout-bridge/src/text-measurement.ts b/packages/layout-engine/layout-bridge/src/text-measurement.ts
+index 6e0450944125f4c4ea8c91a703f5d95a6f2bd986..69f8a5c1ee06c3ea3e298e61aa1a4e7a8e7a24f8 100644
+--- a/packages/layout-engine/layout-bridge/src/text-measurement.ts
++++ b/packages/layout-engine/layout-bridge/src/text-measurement.ts
+@@ -146,7 +146,6 @@ type GetJustifyAdjustmentParams = {
+   availableWidthOverride?: number;
+   alignmentOverride?: string;
+   isLastLineOfParagraph?: boolean;
+-  paragraphEndsWithLineBreak?: boolean;
+   skipJustifyOverride?: boolean;
+ };
+ 
+@@ -193,7 +192,7 @@ const countSpaces = (text: string): number => {
+  *
+  * Edge Cases:
+  * - Non-justify alignment: Returns zero adjustment
+- * - Last line of paragraph: Returns zero adjustment (unless paragraph ends with soft break)
++ * - Last line of paragraph or explicitly soft-break-ended line: Returns zero adjustment
+  * - No spaces: Returns zero adjustment (prevents division by zero)
+  * - Lines with author-defined tab stops: Returns zero adjustment
+  * - Compressed lines: Returns negative adjustment (naturalWidth used for slack calculation)
+@@ -209,9 +208,6 @@ const countSpaces = (text: string): number => {
+  * @param params.isLastLineOfParagraph - Whether this is the last line of the paragraph.
+  *   If not provided, auto-derived from block/line: `line.toRun >= block.runs.length - 1`.
+  *   Auto-derivation ensures measurement matches rendering. Returns false for empty runs arrays.
+- * @param params.paragraphEndsWithLineBreak - Whether the paragraph ends with a soft break (Shift+Enter).
+- *   If not provided, auto-derived: `lastRun?.kind === 'lineBreak'`.
+- *   Auto-derivation ensures measurement matches rendering. Returns false for empty runs arrays.
+  * @param params.skipJustifyOverride - Explicit override to skip justify
+  * @returns Object containing extraPerSpace (pixels to add after each space) and totalSpaces
+  *
+@@ -232,7 +228,6 @@ const getJustifyAdjustment = ({
+   availableWidthOverride,
+   alignmentOverride,
+   isLastLineOfParagraph,
+-  paragraphEndsWithLineBreak,
+   skipJustifyOverride,
+ }: GetJustifyAdjustmentParams): JustifyAdjustment => {
+   if (block.kind !== 'paragraph') {
+@@ -252,14 +247,13 @@ const getJustifyAdjustment = ({
+   const lastRun = block.runs[lastRunIndex];
+   const lastRunLength = getRunCharacterLength(lastRun);
+   const derivedIsLastLine = line.toRun > lastRunIndex || (line.toRun === lastRunIndex && line.toChar >= lastRunLength);
+-  const derivedEndsWithLineBreak = lastRun ? lastRun.kind === 'lineBreak' : false;
+   // Determine if justify should be applied using shared logic
+   const shouldJustify = shouldApplyJustify({
+     alignment,
+     hasExplicitPositioning: line.segments?.some((seg) => seg.x !== undefined) ?? false,
+     hasExplicitTabStops: line.hasExplicitTabStops === true,
+     isLastLineOfParagraph: isLastLineOfParagraph ?? derivedIsLastLine,
+-    paragraphEndsWithLineBreak: paragraphEndsWithLineBreak ?? derivedEndsWithLineBreak,
++    lineEndsWithLineBreak: line.endsWithLineBreak,
+     skipJustifyOverride,
+   });
+ 
+@@ -768,8 +762,7 @@ export function findCharacterAtX(
+   const alignment = alignmentOverride ?? (block.kind === 'paragraph' ? block.attrs?.alignment : undefined);
+   // For justify alignment, the line is stretched to fill available width (slack distributed across spaces)
+   // For center/right alignment, the line keeps its natural width and is positioned within the available space
+-  const renderedLineWidth =
+-    alignment === 'justify' ? line.width + Math.max(0, availableWidth - line.width) : line.width;
++  const renderedLineWidth = alignment === 'justify' && justify.extraPerSpace !== 0 ? availableWidth : line.width;
+   const hasExplicitPositioning = line.segments?.some((seg) => seg.x !== undefined);
+   const alignmentOffset =
+     !hasExplicitPositioning && alignment === 'center'
+diff --git a/packages/layout-engine/layout-bridge/test/text-measurement.test.ts b/packages/layout-engine/layout-bridge/test/text-measurement.test.ts
+index 644cffec003f7dd8474d0019e9e6a57f2d9ed9f0..2b6a138df710eda6d4784b90203d17dfc757488f 100644
+--- a/packages/layout-engine/layout-bridge/test/text-measurement.test.ts
++++ b/packages/layout-engine/layout-bridge/test/text-measurement.test.ts
+@@ -1,6 +1,7 @@
+ import { beforeAll, describe, expect, it } from 'vitest';
+ import type { FlowBlock, Line, Run } from '@superdoc/contracts';
+ import { findCharacterAtX, measureCharacterX, charOffsetToPm } from '../src/text-measurement.ts';
++import { remeasureParagraph } from '../src/remeasure.ts';
+ 
+ // Helper to count spaces (tests functionality indirectly through justify calculations)
+ const countSpaces = (text: string): number => {
+@@ -492,6 +493,29 @@ describe('text measurement utility', () => {
+       expect(x2).toBe(x2Base);
+     });
+ 
++    it('keeps internal soft-break caret positions natural while justifying automatic wraps', () => {
++      const block = {
++        kind: 'paragraph' as const,
++        id: 'soft-break-spacing',
++        attrs: { alignment: 'justify' as const },
++        runs: [
++          { text: 'A B C D E F G H', fontFamily: 'Arial', fontSize: 16, pmStart: 1 },
++          { kind: 'lineBreak' as const },
++          { text: 'after', fontFamily: 'Arial', fontSize: 16 },
++        ],
++      };
++      const { lines } = remeasureParagraph(block, 100);
++      const automaticLine = lines[0];
++      const softBreakLine = lines[lines.length - 2];
++      const natural = measureCharacterX(block, softBreakLine, 2, softBreakLine.width);
++      const painted = measureCharacterX(block, softBreakLine, 2, 100);
++      expect(painted).toBe(natural);
++      expect(findCharacterAtX(block, softBreakLine, painted, 1, 100).charOffset).toBe(2);
++      expect(measureCharacterX(block, automaticLine, 2, 100)).toBeGreaterThan(
++        measureCharacterX(block, automaticLine, 2, automaticLine.width),
++      );
++    });
++
+     it('skips justify spacing on the last line of a paragraph', () => {
+       // Single-line paragraph: the line IS the last line, so justify should be skipped
+       const block = createBlock([{ text: 'A B', fontFamily: 'Arial', fontSize: 16 }]);
+@@ -512,24 +536,14 @@ describe('text measurement utility', () => {
+       expect(x2WithSlack).toBe(x2Normal);
+     });
+ 
+-    it('applies justify spacing on last line when paragraph ends with lineBreak', () => {
+-      // Paragraph ending with lineBreak (soft break / Shift+Enter) SHOULD justify the last line
++    it('preserves natural spacing before a trailing soft break', () => {
+       const block = createBlock([{ text: 'A B', fontFamily: 'Arial', fontSize: 16 }, { kind: 'lineBreak' as const }]);
+-      const line = baseLine({
+-        fromRun: 0,
+-        toRun: 0, // This line doesn't include the lineBreak run
+-        toChar: 3,
+-        width: 30,
+-        maxWidth: 100,
+-      });
+-      (block as any).attrs = { alignment: 'justify' };
+-
+-      // With soft break at end, even last line should be justified
+-      const x2Normal = measureCharacterX(block, line, 2, 30);
+-      const x2Justified = measureCharacterX(block, line, 2, 100);
+-
+-      // Should be justified (wider) because paragraph ends with lineBreak
+-      expect(x2Justified).toBeGreaterThan(x2Normal);
++      block.attrs = { alignment: 'justify' };
++      const line = remeasureParagraph(block, 100).lines[0];
++      const natural = measureCharacterX(block, line, 2, line.width);
++      const painted = measureCharacterX(block, line, 2, 100);
++      expect(painted).toBe(natural);
++      expect(findCharacterAtX(block, line, painted, 0, 100).charOffset).toBe(2);
+     });
+ 
+     it('handles empty runs array without crashing', () => {
+diff --git a/packages/layout-engine/measuring/dom/src/index.ts b/packages/layout-engine/measuring/dom/src/index.ts
+index 86e182f72e54df6964141712c80ec4401cae973d..54dcf0733d9f2df2b230edba56bc564de3a38b3f 100644
+--- a/packages/layout-engine/measuring/dom/src/index.ts
++++ b/packages/layout-engine/measuring/dom/src/index.ts
+@@ -1530,11 +1530,15 @@ async function measureParagraphBlock(
+   for (let runIndex = 0; runIndex < runsToProcess.length; runIndex++) {
+     const run = runsToProcess[runIndex];
+ 
+-    if ((run as Run).kind === 'break') {
++    if (run.kind === 'break') {
+       if (currentLine) {
+         const metrics = finalizeLineMetrics(currentLine, spacing);
+         const lineBase = currentLine;
+-        const completedLine: Line = { ...lineBase, ...metrics };
++        const completedLine: Line = {
++          ...lineBase,
++          ...metrics,
++          ...(run.breakType === 'line' ? { endsWithLineBreak: true } : {}),
++        };
+         addBarTabsToLine(completedLine);
+         lines.push(completedLine);
+         currentLine = null;
+@@ -1548,6 +1552,7 @@ async function measureParagraphBlock(
+           width: 0,
+           segments: [],
+           ...metrics,
++          ...(run.breakType === 'line' ? { endsWithLineBreak: true } : {}),
+         };
+         addBarTabsToLine(emptyLine);
+         lines.push(emptyLine);
+@@ -1569,6 +1574,7 @@ async function measureParagraphBlock(
+         const completedLine: Line = {
+           ...currentLine,
+           ...metrics,
++          endsWithLineBreak: true,
+         };
+         addBarTabsToLine(completedLine);
+         lines.push(completedLine);
+@@ -1585,6 +1591,7 @@ async function measureParagraphBlock(
+           maxWidth: getEffectiveWidth(lines.length === 0 ? initialAvailableWidth : bodyContentWidth),
+           segments: [],
+           ...metrics,
++          endsWithLineBreak: true,
+         };
+         addBarTabsToLine(emptyLine);
+         lines.push(emptyLine);
+diff --git a/packages/layout-engine/painters/dom/src/index.test.ts b/packages/layout-engine/painters/dom/src/index.test.ts
+index 8c55f08d18d7bbfe4d2e276116fbf484469f4ddf..e581a242a2baa482d548131c8a735bdece3fea41 100644
+--- a/packages/layout-engine/painters/dom/src/index.test.ts
++++ b/packages/layout-engine/painters/dom/src/index.test.ts
+@@ -1303,16 +1303,14 @@ describe('DomPainter', () => {
+     expect(lines[0].style.wordSpacing).toBe('');
+   });
+ 
+-  it('justifies last visible line when paragraph ends with lineBreak', () => {
+-    // When a paragraph ends with <w:br/> (lineBreak), the visible text before the break
+-    // should still be justified because the "last line" is the empty line after the break.
++  it('preserves natural spacing before a trailing lineBreak while justifying automatic wraps', () => {
+     const justifyWithBreakBlock: FlowBlock = {
+       kind: 'paragraph',
+       id: 'justify-break-block',
+       runs: [
+         { text: 'a b', fontFamily: 'Arial', fontSize: 16 },
+         { text: 'c d', fontFamily: 'Arial', fontSize: 16 },
+-        { kind: 'lineBreak' }, // Trailing lineBreak means last visible line should be justified
++        { kind: 'lineBreak' },
+       ],
+       attrs: { alignment: 'justify' },
+     };
+@@ -1341,6 +1339,7 @@ describe('DomPainter', () => {
+           ascent: 12,
+           descent: 4,
+           lineHeight: 20,
++          endsWithLineBreak: true,
+         },
+       ],
+       totalHeight: 40,
+@@ -1371,9 +1370,9 @@ describe('DomPainter', () => {
+ 
+     const lines = Array.from(mount.querySelectorAll('.superdoc-line')) as HTMLElement[];
+     expect(lines).toHaveLength(2);
+-    // Both lines should be justified because paragraph ends with lineBreak
++    // Only the automatically wrapped line is justified.
+     expect(lines[0].style.wordSpacing).toBe('40px');
+-    expect(lines[1].style.wordSpacing).toBe('50px');
++    expect(lines[1].style.wordSpacing).toBe('');
+   });
+ 
+   it('does not justify single-line paragraph (features_lists case)', () => {
+@@ -1433,9 +1432,7 @@ describe('DomPainter', () => {
+     expect(lines[0].style.wordSpacing).toBe('');
+   });
+ 
+-  it('justifies single-line paragraph when it ends with lineBreak', () => {
+-    // A single-line paragraph that ends with <w:br/> SHOULD be justified
+-    // because the empty line after the break is the "true" last line.
++  it('preserves natural spacing in a single-line paragraph ending with lineBreak', () => {
+     const singleLineWithBreakBlock: FlowBlock = {
+       kind: 'paragraph',
+       id: 'single-line-break-block',
+@@ -1456,6 +1453,7 @@ describe('DomPainter', () => {
+           ascent: 12,
+           descent: 4,
+           lineHeight: 20,
++          endsWithLineBreak: true,
+         },
+       ],
+       totalHeight: 20,
+@@ -1486,8 +1484,7 @@ describe('DomPainter', () => {
+ 
+     const lines = Array.from(mount.querySelectorAll('.superdoc-line')) as HTMLElement[];
+     expect(lines).toHaveLength(1);
+-    // Ends with lineBreak, so this visible line SHOULD be justified
+-    expect(lines[0].style.wordSpacing).not.toBe('');
++    expect(lines[0].style.wordSpacing).toBe('');
+   });
+ 
+   it('justifies last line of fragment when paragraph continues to next fragment', () => {
+diff --git a/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.test.ts b/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.test.ts
+index 1799d42ec4f9c255c98557282c898af8c55e9cec..942466ca5ce40f331a1fc9b921869badb1768546 100644
+--- a/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.test.ts
++++ b/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.test.ts
+@@ -91,7 +91,7 @@ describe('renderParagraphContent', () => {
+     expect(frameEl.style.getPropertyValue('--sd-sdt-chrome-width')).toBe('');
+   });
+ 
+-  it('includes nested inline SDT paint chrome in block SDT bounds', () => {
++  it.each([false, true])('includes nested inline SDT paint chrome with a trailing soft break: %s', (softBreak) => {
+     const doc = document.implementation.createHTMLDocument('paragraph-content');
+     const frameEl = doc.createElement('div');
+     const block: ParagraphBlock = {
+@@ -111,8 +111,10 @@ describe('renderParagraphContent', () => {
+           },
+         },
+         { text: ' outer trail', fontFamily: 'Arial', fontSize: 16 },
++        ...(softBreak ? [{ kind: 'lineBreak' as const }] : []),
+       ],
+       attrs: {
++        alignment: 'justify',
+         sdt: {
+           type: 'structuredContent',
+           scope: 'block',
+@@ -133,6 +135,7 @@ describe('renderParagraphContent', () => {
+           ascent: 12,
+           descent: 4,
+           lineHeight: 20,
++          endsWithLineBreak: softBreak,
+         },
+       ],
+       totalHeight: 20,
+@@ -144,7 +147,21 @@ describe('renderParagraphContent', () => {
+       block,
+       measure,
+       containerKind: 'body-fragment',
+-      width: 200,
++      width: 300,
++      resolvedContent: {
++        lines: [{
++          line: measure.lines[0],
++          lineIndex: 0,
++          availableWidth: 200,
++          skipJustify: false,
++          paddingLeftPx: 0,
++          paddingRightPx: 0,
++          textIndentPx: 0,
++          isListFirstLine: false,
++          hasExplicitSegmentPositioning: false,
++          indentOffset: 0,
++        }],
++      },
+       localStartLine: 0,
+       localEndLine: 1,
+       applySdtDataset: () => {},
+@@ -152,7 +169,7 @@ describe('renderParagraphContent', () => {
+     });
+ 
+     expect(frameEl.style.getPropertyValue('--sd-sdt-chrome-left')).toBe('0px');
+-    expect(frameEl.style.getPropertyValue('--sd-sdt-chrome-width')).toBe('124px');
++    expect(frameEl.style.getPropertyValue('--sd-sdt-chrome-width')).toBe(softBreak ? '124px' : '204px');
+   });
+ 
+   it('marks the final remeasured override line as the paragraph final line', () => {
+diff --git a/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.ts b/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.ts
+index be808a421e671ee8ee2569b3412a4c98c3e218f4..bd6029c7aa6ac78be9c82ed774db9743af345600 100644
+--- a/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.ts
++++ b/packages/layout-engine/painters/dom/src/paragraph/renderParagraphContent.ts
+@@ -335,7 +335,6 @@ const applyBlockSdtChromeBounds = (
+       lines.length,
+       fragmentContinuesOnNext,
+       resolvedLine,
+-      content,
+     );
+     const paintedLineWidthWithChrome = paintedLineWidth + inlineSdtChromeWidth;
+     const alignmentSlack = Math.max(0, availableWidth - paintedLineWidthWithChrome);
+@@ -446,12 +445,9 @@ const resolveBlockSdtChromePaintedLineWidth = (
+   fragmentLineCount: number,
+   fragmentContinuesOnNext: boolean | undefined,
+   resolvedLine: ResolvedParagraphContent['lines'][number] | undefined,
+-  content: ResolvedParagraphContent | undefined,
+ ): number => {
+   const explicitPositionedSegmentCount = line.segments?.filter((segment) => segment.x !== undefined).length ?? 0;
+   const hasMultipleExplicitPositionedSegments = explicitPositionedSegmentCount > 1;
+-  const paragraphEndsWithLineBreak =
+-    content?.paragraphEndsWithLineBreak === true || block.runs[block.runs.length - 1]?.kind === 'lineBreak';
+   const isLastLineOfParagraph =
+     resolvedLine != null
+       ? resolvedLine.skipJustify
+@@ -461,7 +457,7 @@ const resolveBlockSdtChromePaintedLineWidth = (
+     hasExplicitPositioning: line.segments?.some((segment) => segment.x !== undefined) === true,
+     hasExplicitTabStops: line.hasExplicitTabStops === true,
+     isLastLineOfParagraph,
+-    paragraphEndsWithLineBreak,
++    lineEndsWithLineBreak: line.endsWithLineBreak,
+     skipJustifyOverride: (resolvedLine?.skipJustify ?? false) || hasMultipleExplicitPositionedSegments,
+   });
+ 
+diff --git a/packages/layout-engine/painters/dom/src/renderer-parity-contracts.test.ts b/packages/layout-engine/painters/dom/src/renderer-parity-contracts.test.ts
+index 901c37e5a5739879defb8367e81bd483ba7fd241..2cbf7813060a4480ff35db3529f5fdc1e9898ccb 100644
+--- a/packages/layout-engine/painters/dom/src/renderer-parity-contracts.test.ts
++++ b/packages/layout-engine/painters/dom/src/renderer-parity-contracts.test.ts
+@@ -362,13 +362,13 @@ describe('body vs table-cell line-level parity', () => {
+       expect(tableLines[1]!.wordSpacing).toBe('');
+     });
+ 
+-    it('lineBreak-ending justify paragraph: last line justified in both', () => {
++    it('lineBreak-ending justify paragraph: natural soft-break spacing in body and table', () => {
+       const runs = [
+         { text: JUSTIFY_TEXT, fontFamily: 'Arial', fontSize: 12, pmStart: 1, pmEnd: 1 + JUSTIFY_TEXT_LEN },
+         { kind: 'lineBreak' as const, pmStart: 1 + JUSTIFY_TEXT_LEN, pmEnd: 2 + JUSTIFY_TEXT_LEN },
+       ];
+       const halfLen = Math.floor(JUSTIFY_TEXT_LEN / 2);
+-      const lines = [makeLine(0, halfLen), makeLine(halfLen, JUSTIFY_TEXT_LEN)];
++      const lines = [makeLine(0, halfLen), { ...makeLine(halfLen, JUSTIFY_TEXT_LEN), endsWithLineBreak: true }];
+       const opts = {
+         text: JUSTIFY_TEXT,
+         runs,
+@@ -380,10 +380,10 @@ describe('body vs table-cell line-level parity', () => {
+ 
+       expect(bodyLines.length).toBe(2);
+       expect(tableLines.length).toBe(2);
+-      // lineBreak ending means last line IS justified
+-      expect(bodyLines[1]!.wordSpacing).not.toBe('');
+-      expect(tableLines[1]!.wordSpacing).not.toBe('');
+-      expect(bodyLines[1]!.wordSpacing).toBe(tableLines[1]!.wordSpacing);
++      expect(bodyLines[0]!.wordSpacing).not.toBe('');
++      expect(tableLines[0]!.wordSpacing).not.toBe('');
++      expect(bodyLines[1]!.wordSpacing).toBe('');
++      expect(tableLines[1]!.wordSpacing).toBe('');
+     });
+   });
+ 
+diff --git a/packages/layout-engine/painters/dom/src/runs/render-line.ts b/packages/layout-engine/painters/dom/src/runs/render-line.ts
+index b9f7ceb943f340edb34a34fafdc9f2bbe7285b63..cb6e082934d253a2c7ed291be8dda66f2d18930a 100644
+--- a/packages/layout-engine/painters/dom/src/runs/render-line.ts
++++ b/packages/layout-engine/painters/dom/src/runs/render-line.ts
+@@ -404,7 +404,7 @@ export const renderLine = ({
+     hasExplicitTabStops: line.hasExplicitTabStops === true,
+     // Caller already folds last-line + trailing lineBreak behavior into skipJustify.
+     isLastLineOfParagraph: false,
+-    paragraphEndsWithLineBreak: false,
++    lineEndsWithLineBreak: line.endsWithLineBreak,
+     skipJustifyOverride: skipJustify || hasMultipleExplicitPositionedSegments,
+   });
+ 
+diff --git a/packages/super-editor/src/editors/v1/core/Editor.ts b/packages/super-editor/src/editors/v1/core/Editor.ts
+index 6b96ce2999e31c4e9243da4dae43a222cb198c2b..7ed81d7e20a59d288c569081f4c7db3ec26ad8f2 100644
+--- a/packages/super-editor/src/editors/v1/core/Editor.ts
++++ b/packages/super-editor/src/editors/v1/core/Editor.ts
+@@ -1,4 +1,5 @@
+ import type { EditorState, Transaction, Plugin } from 'prosemirror-state';
++export type { SelectionBookmark, Transaction } from 'prosemirror-state';
+ import { AddMarkStep, RemoveMarkStep, ReplaceAroundStep, ReplaceStep, Transform } from 'prosemirror-transform';
+ import type { EditorView as PmEditorView } from 'prosemirror-view';
+ import type { Mark as PmMark, Node as PmNode, Schema, Slice as PmSlice } from 'prosemirror-model';
+@@ -34,6 +35,7 @@ import {
+ } from './extensions/index.js';
+ import { createDocument } from './helpers/createDocument.js';
+ import { isActive } from './helpers/isActive.js';
++import { getHostSelectionFormattingState, type HostFormattingState } from './helpers/getMarksFromSelection.js';
+ import {
+   trackedTransaction,
+   isCompositionTransaction,
+@@ -86,7 +88,8 @@ import type { EditorRenderer } from './renderers/EditorRenderer.js';
+ import { ProseMirrorRenderer } from './renderers/ProseMirrorRenderer.js';
+ import { BLANK_DOCX_DATA_URI } from './blank-docx.js';
+ import { getArrayBufferFromUrl } from '@core/super-converter/helpers.js';
+-import { Telemetry, COMMUNITY_LICENSE_KEY } from '@superdoc/common';
++import { Telemetry, COMMUNITY_LICENSE_KEY, comments_module_events } from '@superdoc/common';
++import { exportSubEditorToPart } from './parts/adapters/header-footer-sync.js';
+ import type { DocumentApi, ResolveRangeOutput } from '@superdoc/document-api';
+ import { createDocumentApi, DEFAULT_PROTECTION_STATE } from '@superdoc/document-api';
+ import { getDocumentApiAdapters } from '../document-api-adapters/index.js';
+@@ -105,7 +108,10 @@ import { readSettingsRoot, parseProtectionState } from '../document-api-adapters
+ import { applyEffectiveEditability, getProtectionStorage } from '../extensions/protection/editability.js';
+ import { getViewModeSelectionWithoutStructuredContent } from './helpers/getViewModeSelectionWithoutStructuredContent.js';
+ import { resolveMainBodyEditor } from '../document-api-adapters/helpers/word-statistics.js';
+-import { commitLiveStorySessionRuntimes } from '../document-api-adapters/story-runtime/live-story-session-runtime-registry.js';
++import {
++  commitLiveStorySessionRuntimes,
++  getLiveStorySessionEditors,
++} from '../document-api-adapters/story-runtime/live-story-session-runtime-registry.js';
+ import { buildFilteredMetadataXml } from '../document-api-adapters/plan-engine/anchored-metadata-wrappers.js';
+ 
+ type TrackChangesRuntimeConfig = NonNullable<EditorOptions['trackedChanges']>;
+@@ -890,6 +896,12 @@ export class Editor extends EventEmitter<EditorEventMap> {
+    */
+   constructor(options: Partial<EditorOptions>) {
+     super();
++    this.on('partChanged', () => this.emit('host-mutation', { editor: this, source: 'parts' }));
++    this.on('commentsUpdate', (event) => {
++      if (event.type === comments_module_events.SELECTED || event.type === comments_module_events.PENDING) return;
++      this.emit('host-mutation', { editor: this, source: 'comments' });
++    });
++    this.on('documentReplaced', () => this.emit('host-mutation', { editor: this, source: 'parts' }));
+ 
+     const resolvedOptions = normalizeEditorTrackChangesOptions(options);
+     const domAvailable = canUseDOM();
+@@ -3457,6 +3469,60 @@ export class Editor extends EventEmitter<EditorEventMap> {
+     });
+   };
+ 
++  /** Effective selection formatting, including inherited and mixed properties. */
++  getHostFormattingState(): HostFormattingState {
++    return getHostSelectionFormattingState(this.state, this);
++  }
++
++  /** Drain real pending DOM input without forcing an active IME to end. */
++  flushPendingInputForHost(): { ok: true } | { ok: false; reason: 'composing' } {
++    if (this.view?.composing) return { ok: false, reason: 'composing' };
++    const observer = (this.view as unknown as { domObserver?: { forceFlush(): void; flush(): void } } | null)?.domObserver;
++    observer?.forceFlush();
++    observer?.flush();
++    if (this.view?.composing) return { ok: false, reason: 'composing' };
++    this.#flushDeferredCompositionTracking();
++    observer?.forceFlush();
++    observer?.flush();
++    if (this.view?.composing) return { ok: false, reason: 'composing' };
++    return { ok: true };
++  }
++
++  /** Root and every living interactive story editor, root first. */
++  getHostEditors(): Editor[] {
++    const root = resolveMainBodyEditor(this);
++    const editors = new Set<Editor>([root, ...getLiveStorySessionEditors(root)]);
++    for (const entry of [...(root.converter?.headerEditors ?? []), ...(root.converter?.footerEditors ?? [])]) {
++      if (entry.editor instanceof Editor && !entry.editor.isDestroyed) editors.add(entry.editor);
++    }
++    return [...editors];
++  }
++
++  /** Synchronous stable-input barrier used before host snapshots and DOCX export. */
++  flushPendingInputForExport(): { ok: true } | { ok: false; reason: 'composing' } {
++    const editors = this.getHostEditors();
++    if (editors.some((editor) => editor.view?.composing)) return { ok: false, reason: 'composing' };
++    for (const editor of editors) {
++      const result = editor.flushPendingInputForHost();
++      if (!result.ok) return result;
++    }
++    const root = editors[0];
++    const liveEditors = getLiveStorySessionEditors(root);
++    const liveRefs = new Set(liveEditors.map((editor) => editor.options.headerFooterRefId));
++    for (const type of ['header', 'footer'] as const) {
++      const entries = type === 'header' ? root.converter?.headerEditors : root.converter?.footerEditors;
++      for (const entry of entries ?? []) {
++        if (!(entry.editor instanceof Editor) || entry.editor.isDestroyed || liveEditors.includes(entry.editor)) continue;
++        if (typeof entry.id !== 'string' || liveRefs.has(entry.id)) continue;
++        if (!exportSubEditorToPart(root, entry.editor, entry.id, type)) {
++          throw new Error(`Cannot persist ${type} story ${entry.id}.`);
++        }
++      }
++    }
++    commitLiveStorySessionRuntimes(editors[0]);
++    return { ok: true };
++  }
++
+   #dispatchTransaction(transaction: Transaction): void {
+     if (this.isDestroyed) return;
+     const perf = this.view?.dom?.ownerDocument?.defaultView?.performance ?? globalThis.performance;
+@@ -3472,6 +3538,7 @@ export class Editor extends EventEmitter<EditorEventMap> {
+     // emitted with `docChanged` / `mapping` that consumers (notably
+     // PresentationEditor.handleUpdate) actually need.
+     let effectiveTransaction: Transaction = transaction;
++    let hostTransactions: readonly Transaction[];
+     const forceTrackChanges = transactionToApply.getMeta('forceTrackChanges') === true;
+     try {
+       const trackChangesState = TrackChangesBasePluginKey.getState(prevState);
+@@ -3561,6 +3628,7 @@ export class Editor extends EventEmitter<EditorEventMap> {
+           : transactionToApply;
+ 
+       const { state: appliedState, transactions: appliedTransactions } = prevState.applyTransaction(transactionToApply);
++      hostTransactions = appliedTransactions;
+       nextState = appliedState;
+       this.#updateDeferredCompositionRange(
+         appliedTransactions,
+@@ -3584,7 +3652,10 @@ export class Editor extends EventEmitter<EditorEventMap> {
+     } catch (error) {
+       if (forceTrackChanges) throw error;
+       // just in case
+-      nextState = prevState.apply(transactionToApply);
++      const fallback = prevState.applyTransaction(transactionToApply);
++      nextState = fallback.state;
++      hostTransactions = fallback.transactions;
++      effectiveTransaction = hostTransactions.find((t) => t.docChanged) ?? transactionToApply;
+       console.log(error);
+     }
+ 
+@@ -3594,6 +3665,9 @@ export class Editor extends EventEmitter<EditorEventMap> {
+     if (this.view) {
+       this.view.updateState(nextState);
+     }
++    if (prevState.doc !== nextState.doc) {
++      this.emit('host-mutation', { editor: this, source: 'document' });
++    }
+ 
+     const end = perfNow();
+ 
+@@ -3601,6 +3675,7 @@ export class Editor extends EventEmitter<EditorEventMap> {
+       editor: this,
+       transaction: transactionToApply,
+       duration: end - perfStart,
++      appliedTransactions: hostTransactions,
+     });
+ 
+     if (selectionHasChanged) {
+@@ -4235,8 +4310,8 @@ export class Editor extends EventEmitter<EditorEventMap> {
+     compression,
+   }: ExportDocxParams = {}): Promise<Blob | Buffer | Record<string, string | null> | string | ConvertedXmlPart> {
+     try {
+-      const exportHostEditor = resolveMainBodyEditor(this);
+-      commitLiveStorySessionRuntimes(exportHostEditor);
++      const input = this.flushPendingInputForExport();
++      if (!input.ok) throw new Error('Cannot export DOCX while IME composition is active.');
+ 
+       // Use provided comments, or fall back to imported comments from converter
+       const effectiveComments = comments ?? this.converter.comments ?? [];
+@@ -4285,7 +4360,8 @@ export class Editor extends EventEmitter<EditorEventMap> {
+       this.#persistTrackedChangeSourceIdMap();
+ 
+       const customXml = this.converter.schemaToXml(this.converter.convertedXml['docProps/custom.xml'].elements[0]);
+-      const styles = this.converter.schemaToXml(this.converter.convertedXml['word/styles.xml'].elements[0]);
++      const stylesData = this.converter.convertedXml['word/styles.xml'];
++      const styles = stylesData?.elements?.[0] ? this.converter.schemaToXml(stylesData.elements[0]) : null;
+       const hasCustomSettings = !!this.converter.convertedXml['word/settings.xml']?.elements?.length;
+       const customSettings = hasCustomSettings
+         ? this.converter.schemaToXml(this.converter.convertedXml['word/settings.xml']?.elements?.[0])
+@@ -4348,7 +4424,7 @@ export class Editor extends EventEmitter<EditorEventMap> {
+         'docProps/custom.xml': String(customXml),
+         'word/_rels/document.xml.rels': String(rels),
+         ...(numbering ? { 'word/numbering.xml': String(numbering) } : {}),
+-        'word/styles.xml': String(styles),
++        ...(styles ? { 'word/styles.xml': String(styles) } : {}),
+         ...updatedHeadersFooters,
+         ...(appXml ? { 'docProps/app.xml': String(appXml) } : {}),
+         ...(coreXml ? { 'docProps/core.xml': String(coreXml) } : {}),
+diff --git a/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.js b/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.js
+index 0202770995aadca4c5a7efae1252f0c070faca7b..4c7038cc72739cf3f21d7b1734830ba90c1c7263 100644
+--- a/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.js
++++ b/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.js
+@@ -25,23 +25,21 @@ export const isLinkedCharacterStyleId = (editor, styleId) => {
+   return Object.values(translatedStyles).some((def) => def?.type === 'paragraph' && def?.link === styleId);
+ };
+ 
+-export const clearInheritedLinkedStyleId = (attrs, editor, { emptyParagraph = false } = {}) => {
+-  if (!emptyParagraph) return attrs;
+-  // SD-3400: pressing Enter in a footnote continues with the note style;
+-  // clearing it here made new note paragraphs render at the document default
+-  // size. The clearing heuristic targets body heading-like flows, so it stays
+-  // active for the body and header/footer.
+-  if (isNoteStorySession(editor)) return attrs;
+-  if (!attrs || typeof attrs !== 'object') return attrs;
++export const resolveNextParagraphStyle = (attrs, editor, { emptyParagraph = false } = {}) => {
++  if (!emptyParagraph || !attrs || typeof attrs !== 'object') return attrs;
+   const paragraphProperties = attrs.paragraphProperties;
+   const styleId = paragraphProperties?.styleId;
+-  if (!isLinkedParagraphStyleId(editor, styleId)) return attrs;
++  const styles = readTranslatedLinkedStyles(editor)?.styles;
++  const nextStyleId = styles?.[styleId]?.next;
++  // w:link identifies a character-style counterpart, not a following paragraph
++  // style. With no w:next (including note styles), Enter keeps the current style.
++  if (!nextStyleId || nextStyleId === styleId || styles?.[nextStyleId]?.type !== 'paragraph') return attrs;
+ 
+   return {
+     ...attrs,
+     paragraphProperties: {
+       ...paragraphProperties,
+-      styleId: null,
++      styleId: nextStyleId,
+     },
+   };
+ };
+diff --git a/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.test.js b/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.test.js
+index 4013d655d426d1238978007a173b13a12a09586a..088b9590e1bf074a6769af121f8187a1276a5a14 100644
+--- a/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.test.js
++++ b/packages/super-editor/src/editors/v1/core/commands/linkedStyleSplitHelpers.test.js
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from 'vitest';
+ import {
+-  clearInheritedLinkedStyleId,
++  resolveNextParagraphStyle,
+   isLinkedCharacterStyleId,
+   isLinkedParagraphStyleId,
+ } from './linkedStyleSplitHelpers.js';
+@@ -103,7 +103,7 @@ describe('linkedStyleSplitHelpers', () => {
+     });
+   });
+ 
+-  describe('clearInheritedLinkedStyleId', () => {
++  describe('resolveNextParagraphStyle', () => {
+     it('keeps the linked paragraph style inside a note story session (SD-3400)', () => {
+       // FootnoteText is a linked style (w:link FootnoteTextChar) but has no
+       // w:next: Word keeps it on Enter inside a footnote. Clearing it made
+@@ -123,17 +123,18 @@ describe('linkedStyleSplitHelpers', () => {
+         paragraphProperties: { styleId: 'FootnoteText' },
+       };
+ 
+-      const result = clearInheritedLinkedStyleId(attrs, editor, { emptyParagraph: true });
++      const result = resolveNextParagraphStyle(attrs, editor, { emptyParagraph: true });
+ 
+       expect(result).toBe(attrs);
+     });
+ 
+-    it('removes styleId when it belongs to a linked paragraph style', () => {
++    it('follows the declared next paragraph style without mutating the source', () => {
+       const editor = {
+         converter: {
+           translatedLinkedStyles: {
+             styles: {
+-              Heading1: { styleId: 'Heading1', type: 'paragraph', link: 'Heading1Char' },
++              Heading1: { styleId: 'Heading1', type: 'paragraph', link: 'Heading1Char', next: 'Normal' },
++              Normal: { styleId: 'Normal', type: 'paragraph' },
+             },
+           },
+         },
+@@ -143,10 +144,10 @@ describe('linkedStyleSplitHelpers', () => {
+         preserve: true,
+       };
+ 
+-      const result = clearInheritedLinkedStyleId(attrs, editor, { emptyParagraph: true });
++      const result = resolveNextParagraphStyle(attrs, editor, { emptyParagraph: true });
+ 
+       expect(result).toEqual({
+-        paragraphProperties: { styleId: null, keep: true },
++        paragraphProperties: { styleId: 'Normal', keep: true },
+         preserve: true,
+       });
+       expect(attrs).toEqual({
+@@ -155,6 +156,20 @@ describe('linkedStyleSplitHelpers', () => {
+       });
+     });
+ 
++    it.each([undefined, 'TextBody'])('keeps linked body style with next=%s', (next) => {
++      const editor = {
++        converter: {
++          translatedLinkedStyles: {
++            styles: {
++              TextBody: { type: 'paragraph', link: 'TextBodyChar', next },
++            },
++          },
++        },
++      };
++      const attrs = { paragraphProperties: { styleId: 'TextBody' } };
++      expect(resolveNextParagraphStyle(attrs, editor, { emptyParagraph: true })).toBe(attrs);
++    });
++
+     it('preserves linked paragraph styleId when the new paragraph is not empty', () => {
+       const editor = {
+         converter: {
+@@ -169,7 +184,7 @@ describe('linkedStyleSplitHelpers', () => {
+         paragraphProperties: { styleId: 'Heading1', keep: true },
+       };
+ 
+-      expect(clearInheritedLinkedStyleId(attrs, editor, { emptyParagraph: false })).toBe(attrs);
++      expect(resolveNextParagraphStyle(attrs, editor, { emptyParagraph: false })).toBe(attrs);
+     });
+ 
+     it('leaves attrs unchanged for non-linked styles or missing paragraphProperties', () => {
+@@ -187,12 +202,12 @@ describe('linkedStyleSplitHelpers', () => {
+         paragraphProperties: { styleId: 'BodyText', keep: true },
+       };
+ 
+-      expect(clearInheritedLinkedStyleId(attrs, editor, { emptyParagraph: false })).toBe(attrs);
+-      expect(clearInheritedLinkedStyleId(attrs, editor, { emptyParagraph: true })).toBe(attrs);
+-      expect(clearInheritedLinkedStyleId({ preserve: true }, editor, { emptyParagraph: true })).toEqual({
++      expect(resolveNextParagraphStyle(attrs, editor, { emptyParagraph: false })).toBe(attrs);
++      expect(resolveNextParagraphStyle(attrs, editor, { emptyParagraph: true })).toBe(attrs);
++      expect(resolveNextParagraphStyle({ preserve: true }, editor, { emptyParagraph: true })).toEqual({
+         preserve: true,
+       });
+-      expect(clearInheritedLinkedStyleId(null, editor, { emptyParagraph: true })).toBe(null);
++      expect(resolveNextParagraphStyle(null, editor, { emptyParagraph: true })).toBe(null);
+     });
+   });
+ });
+diff --git a/packages/super-editor/src/editors/v1/core/commands/splitBlock.js b/packages/super-editor/src/editors/v1/core/commands/splitBlock.js
+index 8ebe7c1a6ccaabdca07b28328cc0b9450953d818..eb318baef8be0a9f40aa3c27d251e02a87b09f8e 100644
+--- a/packages/super-editor/src/editors/v1/core/commands/splitBlock.js
++++ b/packages/super-editor/src/editors/v1/core/commands/splitBlock.js
+@@ -3,7 +3,7 @@ import { canSplit } from 'prosemirror-transform';
+ import { defaultBlockAt } from '../helpers/defaultBlockAt.js';
+ import { getSplitRunProperties, syncSplitParagraphRunProperties } from '../helpers/splitParagraphRunProperties.js';
+ import { Attribute } from '../Attribute.js';
+-import { clearInheritedLinkedStyleId } from './linkedStyleSplitHelpers.js';
++import { resolveNextParagraphStyle } from './linkedStyleSplitHelpers.js';
+ 
+ const isHeadingStyleId = (styleId) => typeof styleId === 'string' && /^heading\s*[1-6]$/i.test(styleId.trim());
+ 
+@@ -67,13 +67,15 @@ export const splitBlock =
+ 
+     if (dispatch) {
+       const atEnd = $to.parentOffset === $to.parent.content.size;
+-      newAttrs = clearInheritedLinkedStyleId(newAttrs, editor, { emptyParagraph: atEnd });
++      const sourceStyleId = newAttrs?.paragraphProperties?.styleId;
++      newAttrs = resolveNextParagraphStyle(newAttrs, editor, { emptyParagraph: atEnd });
++      const styleChanged = newAttrs?.paragraphProperties?.styleId !== sourceStyleId;
+ 
+       // When splitting at the end (creating an empty new paragraph), store the
+       // current run's runProperties on the new paragraph so the toolbar and
+       // wrapTextInRunsPlugin know which inline formatting to inherit.
+       if (atEnd) {
+-        const runProperties = getSplitRunProperties(state, $from);
++        const runProperties = styleChanged ? null : getSplitRunProperties(state, $from);
+         newAttrs = syncSplitParagraphRunProperties(newAttrs, runProperties);
+       }
+       if (selection instanceof TextSelection) tr.deleteSelection();
+@@ -106,7 +108,8 @@ export const splitBlock =
+         }
+       }
+ 
+-      if (keepMarks) ensureMarks(state, editor.extensionService.splittableMarks);
++      if (keepMarks && !styleChanged) ensureMarks(state, editor.extensionService.splittableMarks);
++      if (styleChanged) tr.setStoredMarks([]);
+       tr.scrollIntoView();
+     }
+ 
+diff --git a/packages/super-editor/src/editors/v1/core/commands/splitBlock.test.js b/packages/super-editor/src/editors/v1/core/commands/splitBlock.test.js
+index f4769657f3b71534213add1da22f3efb90c6b11b..3e36b544e323ff5cfc1af56f6790a2ff2a590f86 100644
+--- a/packages/super-editor/src/editors/v1/core/commands/splitBlock.test.js
++++ b/packages/super-editor/src/editors/v1/core/commands/splitBlock.test.js
+@@ -394,60 +394,6 @@ describe('splitBlock', () => {
+       expect(attrs.paragraphProperties?.styleId).toBeUndefined();
+     });
+ 
+-    it('does not inherit linked paragraph styles onto the newly created paragraph', () => {
+-      mockEditor.converter = {
+-        translatedLinkedStyles: {
+-          styles: {
+-            Heading2: { styleId: 'Heading2', type: 'paragraph', link: 'Heading2Char' },
+-          },
+-        },
+-      };
+-      const paragraphType = { name: 'paragraph', isTextblock: true, hasRequiredAttrs: vi.fn(() => false) };
+-      const parentNode = {
+-        contentMatchAt: vi.fn(() => ({
+-          edgeCount: 1,
+-          edge: vi.fn(() => ({ type: paragraphType })),
+-        })),
+-      };
+-
+-      const sourceAttrs = {
+-        paragraphProperties: { styleId: 'Heading2', keep: true },
+-      };
+-      const $from = createMockResolvedPos({
+-        depth: 1,
+-        parent: {
+-          isBlock: true,
+-          content: { size: 10 },
+-          type: { name: 'paragraph' },
+-          inlineContent: true,
+-          attrs: sourceAttrs,
+-        },
+-        parentOffset: 5,
+-        node: vi.fn((depth) => {
+-          if (depth === -1) return parentNode;
+-          return { type: { name: 'paragraph' }, attrs: sourceAttrs };
+-        }),
+-      });
+-      const $to = createMockResolvedPos({
+-        pos: 5,
+-        parent: { isBlock: true, content: { size: 10 }, type: { name: 'paragraph' }, inlineContent: true },
+-        parentOffset: 10,
+-      });
+-
+-      mockTr.selection = { $from, $to };
+-      mockState.selection = mockTr.selection;
+-      mockTr.doc = {
+-        resolve: vi.fn(() => $from),
+-      };
+-
+-      const command = splitBlock();
+-      command({ tr: mockTr, state: mockState, dispatch: () => {}, editor: mockEditor });
+-
+-      const splitTypes = mockTr.split.mock.calls[0][2];
+-      expect(splitTypes?.[0]?.attrs?.paragraphProperties?.styleId).toBeNull();
+-      expect(splitTypes?.[0]?.attrs?.paragraphProperties?.keep).toBe(true);
+-      expect(sourceAttrs.paragraphProperties.styleId).toBe('Heading2');
+-    });
+ 
+     it('preserves linked paragraph styles when the split creates a non-empty following paragraph', () => {
+       mockEditor.converter = {
+diff --git a/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.js b/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.js
+index 8c508bf0f7a6d59305e9f30ddb33c9be8a6c180a..f7c6ef24213a5784762028244917af925691f7cb 100644
+--- a/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.js
++++ b/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.js
+@@ -3,12 +3,8 @@ import { getSelectionFormattingState } from '../helpers/getMarksFromSelection.js
+ /**
+  * Cascade-aware toggle for marks that may be provided by styles.
+  *
+- * Behavior:
+- * - If a negation mark is active → remove it (turn ON again)
+- * - Else if direct inline formatting is active and style is also ON → remove inline and add negation
+- * - Else if only direct inline formatting is active → remove it (turn OFF)
+- * - Else if only style provides the effect → add a negation mark (turn OFF style)
+- * - Else → add regular inline mark (turn ON)
++ * Uniform effective ON becomes explicit OFF, including inherited formatting.
++ * OFF or mixed becomes explicit ON across the entire selection.
+  *
+  * @param {string} markName
+  * @param {{
+@@ -20,33 +16,13 @@ import { getSelectionFormattingState } from '../helpers/getMarksFromSelection.js
+ export const toggleMarkCascade =
+   (markName, options = {}) =>
+   ({ state, chain, editor }) => {
+-    const {
+-      negationAttrs = { value: '0' },
+-      isNegation = (attrs) => attrs?.value === '0' || attrs?.value === false,
+-      extendEmptyMarkRange = false,
+-    } = options;
+-
++    const { negationAttrs = { value: '0' }, extendEmptyMarkRange = false } = options;
+     const formattingState = getSelectionFormattingState(state, editor);
+-    const directMarksForType = (formattingState?.inlineMarks || []).filter((m) => m.type?.name === markName);
+-    const hasNegation = directMarksForType.some((m) => isNegation(m.attrs || {}));
+-    const hasInline = directMarksForType.some((m) => !isNegation(m.attrs || {}));
+-    const styleValue = formattingState?.styleRunProperties?.[markName];
+-    const styleOn = isRunPropertyEnabled(styleValue);
+-
+-    const cmdChain = chain();
+-    if (hasNegation) return cmdChain.unsetMark(markName, { extendEmptyMarkRange }).run();
+-
+-    if (hasInline && styleOn) {
+-      return cmdChain
+-        .unsetMark(markName, { extendEmptyMarkRange })
+-        .setMark(markName, negationAttrs, { extendEmptyMarkRange })
+-        .run();
+-    }
+-
+-    if (hasInline) return cmdChain.unsetMark(markName, { extendEmptyMarkRange }).run();
+-    if (styleOn) return cmdChain.setMark(markName, negationAttrs, { extendEmptyMarkRange }).run();
+-
+-    return cmdChain.setMark(markName, {}, { extendEmptyMarkRange }).run();
++    const mixed = formattingState.mixedRunProperties?.[markName] === true;
++    const effectiveOn = !mixed && isRunPropertyEnabled(formattingState.resolvedRunProperties?.[markName]);
++    return chain()
++      .setMark(markName, effectiveOn ? negationAttrs : state.schema.marks[markName].create().attrs, { extendEmptyMarkRange })
++      .run();
+   };
+ 
+ function isRunPropertyEnabled(value) {
+@@ -58,6 +34,9 @@ function isRunPropertyEnabled(value) {
+     if ('val' in value) {
+       return isStyleTokenEnabled(value.val);
+     }
++    if ('underlineType' in value) {
++      return isStyleTokenEnabled(value.underlineType);
++    }
+   }
+   return isStyleTokenEnabled(value);
+ }
+diff --git a/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.test.js b/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.test.js
+index 08b61da4e561250fb87b9ee71a332f6a0ade941a..4ddda82deedd27e1c7bdc16843384f5691ee3c14 100644
+--- a/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.test.js
++++ b/packages/super-editor/src/editors/v1/core/commands/toggleMarkCascade.test.js
+@@ -1,143 +1,86 @@
+ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
++import { Schema } from 'prosemirror-model';
++import { EditorState, TextSelection } from 'prosemirror-state';
++import { setMark } from './setMark.js';
+ 
+ vi.mock('../helpers/getMarksFromSelection.js', () => ({
+   getSelectionFormattingState: vi.fn(),
+ }));
+ 
+ let toggleMarkCascade;
+-let isStyleTokenEnabled;
+ let getSelectionFormattingState;
+ 
+ beforeAll(async () => {
+-  ({ toggleMarkCascade, isStyleTokenEnabled } = await import('./toggleMarkCascade.js'));
++  ({ toggleMarkCascade } = await import('./toggleMarkCascade.js'));
+   ({ getSelectionFormattingState } = await import('../helpers/getMarksFromSelection.js'));
+ });
+ 
+-beforeEach(() => {
+-  vi.clearAllMocks();
+-  getSelectionFormattingState.mockReturnValue({
+-    resolvedMarks: [],
+-    inlineMarks: [],
+-    resolvedRunProperties: null,
+-    inlineRunProperties: null,
+-    styleRunProperties: null,
+-  });
++beforeEach(() => vi.clearAllMocks());
++
++const schema = new Schema({
++  nodes: {
++    doc: { content: 'paragraph+' },
++    paragraph: { content: 'text*' },
++    text: {},
++  },
++  marks: {
++    bold: { attrs: { value: { default: null } } },
++    underline: { attrs: { underlineType: { default: 'single' } } },
++  },
+ });
+ 
+-const makeInlineMark = (attrs = {}) => ({ type: { name: 'bold' }, attrs });
+-
+-const createChain = () => {
+-  const chainApi = {
+-    unsetMark: vi.fn(() => chainApi),
+-    setMark: vi.fn(() => chainApi),
+-    run: vi.fn(() => true),
++function toggle(state, markName = 'bold', options = {}) {
++  const tr = state.tr;
++  const chain = {
++    setMark: (name, attrs) => {
++      setMark(name, attrs)({ tr, state, dispatch: () => {} });
++      return chain;
++    },
++    run: () => true,
+   };
+-  return { chainFn: vi.fn(() => chainApi), chainApi };
+-};
++  toggleMarkCascade(markName, options)({ state, chain: () => chain, editor: {} });
++  return state.apply(tr);
++}
+ 
+-describe('toggleMarkCascade', () => {
+-  const state = { selection: {} };
+-  const editor = {};
++function selectText(marks = []) {
++  const doc = schema.node('doc', null, [schema.node('paragraph', null, schema.text('text', marks))]);
++  return EditorState.create({ doc, selection: TextSelection.create(doc, 1, 5) });
++}
+ 
+-  it('removes an existing negation mark', () => {
+-    getSelectionFormattingState.mockReturnValue({
+-      inlineMarks: [makeInlineMark({ value: '0' })],
+-      inlineRunProperties: { bold: false },
+-      styleRunProperties: { bold: true },
+-    });
+-    const { chainFn, chainApi } = createChain();
+-
+-    toggleMarkCascade('bold')({ state, chain: chainFn, editor });
+-
+-    expect(chainApi.unsetMark).toHaveBeenCalledWith('bold', { extendEmptyMarkRange: false });
+-    expect(chainApi.setMark).not.toHaveBeenCalled();
++describe('toggleMarkCascade', () => {
++  it('turns inherited formatting off explicitly without relying on removal of absent marks', () => {
++    getSelectionFormattingState.mockReturnValue({ resolvedRunProperties: { bold: true } });
++    const result = toggle(selectText());
++    expect(result.doc.firstChild.firstChild.marks[0].attrs.value).toBe('0');
+   });
+ 
+-  it('replaces direct inline formatting with negation when style is also active', () => {
+-    getSelectionFormattingState.mockReturnValue({
+-      inlineMarks: [makeInlineMark({ value: '1' })],
+-      inlineRunProperties: { bold: true },
+-      styleRunProperties: { bold: true },
+-    });
+-    const { chainFn, chainApi } = createChain();
+-    const negationAttrs = { value: 'negated' };
+-
+-    toggleMarkCascade('bold', { negationAttrs })({ state, chain: chainFn, editor });
+-
+-    expect(chainApi.unsetMark).toHaveBeenCalledWith('bold', { extendEmptyMarkRange: false });
+-    expect(chainApi.setMark).toHaveBeenCalledWith('bold', negationAttrs, { extendEmptyMarkRange: false });
++  it('turns a direct negation on instead of inheriting another off value', () => {
++    getSelectionFormattingState.mockReturnValue({ resolvedRunProperties: { bold: false } });
++    const result = toggle(selectText([schema.marks.bold.create({ value: '0' })]));
++    expect(result.doc.firstChild.firstChild.marks[0].attrs.value).toBeNull();
+   });
+ 
+-  it('removes direct inline formatting when no style is active', () => {
++  it('turns mixed ranges uniformly on, replacing negation attributes', () => {
++    const doc = schema.node('doc', null, [schema.node('paragraph', null, [
++      schema.text('on', [schema.marks.bold.create()]),
++      schema.text('off', [schema.marks.bold.create({ value: '0' })]),
++    ])]);
++    const state = EditorState.create({ doc, selection: TextSelection.create(doc, 1, 6) });
+     getSelectionFormattingState.mockReturnValue({
+-      inlineMarks: [makeInlineMark({ value: '1' })],
+-      inlineRunProperties: { bold: true },
+-      styleRunProperties: null,
++      resolvedRunProperties: { bold: true },
++      mixedRunProperties: { bold: true },
+     });
+-    const { chainFn, chainApi } = createChain();
+-
+-    toggleMarkCascade('bold')({ state, chain: chainFn, editor });
+-
+-    expect(chainApi.unsetMark).toHaveBeenCalledWith('bold', { extendEmptyMarkRange: false });
+-    expect(chainApi.setMark).not.toHaveBeenCalled();
+-  });
+-
+-  it('adds a negation mark when only style is active', () => {
+-    getSelectionFormattingState.mockReturnValue({
+-      inlineMarks: [],
+-      inlineRunProperties: null,
+-      styleRunProperties: { bold: true },
++    const result = toggle(state);
++    result.doc.descendants((node) => {
++      if (node.isText) expect(node.marks.map((mark) => mark.attrs.value)).toEqual([null]);
+     });
+-    const { chainFn, chainApi } = createChain();
+-
+-    toggleMarkCascade('bold')({ state, chain: chainFn, editor });
+-
+-    expect(chainApi.setMark).toHaveBeenCalledWith('bold', { value: '0' }, { extendEmptyMarkRange: false });
+-    expect(chainApi.unsetMark).not.toHaveBeenCalled();
+-  });
+-
+-  it('adds inline mark when neither direct nor style formatting is active', () => {
+-    const { chainFn, chainApi } = createChain();
+-
+-    toggleMarkCascade('bold')({ state, chain: chainFn, editor });
+-
+-    expect(chainApi.setMark).toHaveBeenCalledWith('bold', {}, { extendEmptyMarkRange: false });
+   });
+ 
+-  it('treats intersected range state as authoritative for direct formatting', () => {
+-    getSelectionFormattingState.mockReturnValue({
+-      inlineMarks: [],
+-      inlineRunProperties: null,
+-      styleRunProperties: null,
++  it('replaces underline none with enabled underline', () => {
++    getSelectionFormattingState.mockReturnValue({ resolvedRunProperties: { underline: { 'w:val': 'none' } } });
++    const result = toggle(selectText([schema.marks.underline.create({ underlineType: 'none' })]), 'underline', {
++      negationAttrs: { underlineType: 'none' },
+     });
+-    const { chainFn, chainApi } = createChain();
+-
+-    toggleMarkCascade('bold')({ state, chain: chainFn, editor });
+-
+-    expect(chainApi.setMark).toHaveBeenCalledWith('bold', {}, { extendEmptyMarkRange: false });
+-    expect(chainApi.unsetMark).not.toHaveBeenCalled();
+-  });
+-});
+-
+-describe('isStyleTokenEnabled', () => {
+-  it('returns false for explicit falsy states', () => {
+-    expect(isStyleTokenEnabled(false)).toBe(false);
+-    expect(isStyleTokenEnabled(0)).toBe(false);
+-    expect(isStyleTokenEnabled(null)).toBe(false);
+-  });
+-
+-  it('normalizes string tokens that disable styling', () => {
+-    const disabling = ['0', 'false', 'none', 'inherit', 'transparent', ''];
+-    for (const token of disabling) {
+-      expect(isStyleTokenEnabled(token)).toBe(false);
+-    }
+-    expect(isStyleTokenEnabled('   ')).toBe(false);
+-  });
+-
+-  it('returns true for non-empty truthy values', () => {
+-    expect(isStyleTokenEnabled('1')).toBe(true);
+-    expect(isStyleTokenEnabled('Bold ')).toBe(true);
+-    expect(isStyleTokenEnabled({})).toBe(true);
+-    expect(isStyleTokenEnabled(12)).toBe(true);
++    expect(result.doc.firstChild.firstChild.marks[0].attrs.underlineType).toBe('single');
+   });
+ });
+diff --git a/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.d.ts b/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.d.ts
+index b4c83710e2aabddbd36483a88f103e0dc2d1ee72..052dda277bdabe33be4156f779b941cd8c044bd3 100644
+--- a/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.d.ts
++++ b/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.d.ts
+@@ -1,11 +1,7 @@
+ import type { EditorState } from 'prosemirror-state';
+ import type { Mark } from 'prosemirror-model';
+ 
+-export function getMarksFromSelection(state: EditorState): Mark[];
+-export function getSelectionFormattingState(
+-  state: EditorState,
+-  editor?: any,
+-): {
++export interface SelectionFormattingState {
+   resolvedMarks: Mark[];
+   inlineMarks: Mark[];
+   resolvedRunProperties: Record<string, unknown> | null;
+@@ -13,7 +9,20 @@ export function getSelectionFormattingState(
+   styleRunProperties: Record<string, unknown> | null;
+   directMarkRunProperties: Record<string, unknown> | null;
+   mixedRunProperties: Record<string, true> | null;
+-};
++}
++export type HostFontFamily = { kind: 'uniform'; value: string } | { kind: 'mixed' } | { kind: 'unavailable' };
++export interface HostFormattingState extends SelectionFormattingState {
++  hostFontFamily: HostFontFamily;
++}
++export function getHostSelectionFormattingState(state: EditorState, editor?: unknown): HostFormattingState;
++export interface ScriptFontSegment {
++  from: number;
++  to: number;
++  fontFamily: string | null;
++}
++export function getScriptFontSegments(text: string, properties?: object | null, docx?: object | null): ScriptFontSegment[];
++export function getMarksFromSelection(state: EditorState): Mark[];
++export function getSelectionFormattingState(state: EditorState, editor?: unknown): SelectionFormattingState;
+ export function getFormattingStateAtPos(
+   state: EditorState,
+   pos: number,
+@@ -23,29 +32,13 @@ export function getFormattingStateAtPos(
+     includeCursorMarksWithStoredMarks?: boolean;
+     preferParagraphRunProperties?: boolean;
+   },
+-): {
+-  resolvedMarks: Mark[];
+-  inlineMarks: Mark[];
+-  resolvedRunProperties: Record<string, unknown> | null;
+-  inlineRunProperties: Record<string, unknown> | null;
+-  styleRunProperties: Record<string, unknown> | null;
+-  directMarkRunProperties: Record<string, unknown> | null;
+-  mixedRunProperties: Record<string, true> | null;
+-};
++): SelectionFormattingState;
+ export function getFormattingStateForRange(
+   state: EditorState,
+   from: number,
+   to: number,
+   editor?: any,
+-): {
+-  resolvedMarks: Mark[];
+-  inlineMarks: Mark[];
+-  resolvedRunProperties: Record<string, unknown> | null;
+-  inlineRunProperties: Record<string, unknown> | null;
+-  styleRunProperties: Record<string, unknown> | null;
+-  directMarkRunProperties: Record<string, unknown> | null;
+-  mixedRunProperties: Record<string, true> | null;
+-};
++): SelectionFormattingState;
+ export function getInheritedRunProperties(
+   $pos: any,
+   editor?: any,
+diff --git a/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.js b/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.js
+index 77d402853f021ceee899a85fbaa2091b2baa48c7..57119d07d9ea9514bb0a6fd87b6493647abe6f3e 100644
+--- a/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.js
++++ b/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.js
+@@ -2,7 +2,7 @@ import { extractTableInfo } from '@extensions/run/calculateInlineRunPropertiesPl
+ import { calculateResolvedParagraphProperties } from '@extensions/paragraph/resolvedPropertiesCache.js';
+ import { decodeRPrFromMarks, encodeMarksFromRPr } from '@converter/styles.js';
+ 
+-import { resolveRunProperties } from '@superdoc/style-engine/ooxml';
++import { resolveRunProperties, resolveDocxFontFamily } from '@superdoc/style-engine/ooxml';
+ import { normalizeRunProperties } from './normalizeRunProperties.js';
+ 
+ export function getMarksFromSelection(state, editor) {
+@@ -22,6 +22,148 @@ export function getSelectionFormattingState(state, editor) {
+   return getFormattingStateForRange(state, from, to, editor);
+ }
+ 
++/**
++ * Host font state follows the text actually selected, not every rFonts slot.
++ * Keep the full effective formatting contract for existing toolbar consumers.
++ */
++export function getHostSelectionFormattingState(state, editor) {
++  const formatting = getSelectionFormattingState(state, editor);
++  let family;
++  let mixed = false;
++  let unavailable = false;
++  const collect = (text, properties) => {
++    const cache = new Map();
++    for (const character of text) {
++      const next = resolveHostCharacterFont(character, properties, editor?.converter?.convertedXml, cache);
++      if (!next) unavailable = true;
++      else if (family !== undefined && family !== next) mixed = true;
++      else family = next;
++    }
++  };
++  const { from, to, empty, $head } = state.selection;
++  if (empty) {
++    // Match caret mark affinity: preceding text, or following text at a start.
++    const before = $head.nodeBefore?.textContent;
++    const after = $head.nodeAfter?.textContent;
++    const character = before
++      ? before.slice(before.charCodeAt(before.length - 1) >= 0xdc00 && before.charCodeAt(before.length - 1) <= 0xdfff ? -2 : -1)
++      : after ? String.fromCodePoint(after.codePointAt(0)) : ' ';
++    collect(character, formatting.resolvedRunProperties);
++  } else {
++    state.doc.nodesBetween(from, to, (node, pos) => {
++      if (!node.isText || !node.text) return;
++      const start = Math.max(from, pos);
++      const end = Math.min(to, pos + node.nodeSize);
++      if (start >= end) return;
++      const segment = getFormattingStateAtPos(state, pos + 1, editor);
++      collect(node.text.slice(start - pos, end - pos), segment.resolvedRunProperties);
++    });
++  }
++  const hostFontFamily = mixed
++    ? { kind: 'mixed' }
++    : unavailable || !family
++      ? { kind: 'unavailable' }
++      : { kind: 'uniform', value: family };
++  return { ...formatting, hostFontFamily };
++}
++
++// Unicode script identifies the applicable OOXML font slot; language disambiguates
++// shared Han characters and supplies supplemental theme faces for forced CS runs.
++const HOST_FONT_SCRIPTS = [
++  ['Hang', /\p{Script=Hangul}/u, 'eastAsia'],
++  ['Jpan', /[\p{Script=Hiragana}\p{Script=Katakana}]/u, 'eastAsia'],
++  ['Hani', /[\p{Script=Han}\p{Script=Bopomofo}]/u, 'eastAsia'],
++  ['Arab', /\p{Script=Arabic}/u, 'cs'],
++  ['Hebr', /\p{Script=Hebrew}/u, 'cs'],
++  ['Syrc', /\p{Script=Syriac}/u, 'cs'],
++  ['Thaa', /\p{Script=Thaana}/u, 'cs'],
++  ['Deva', /\p{Script=Devanagari}/u, 'cs'],
++  ['Beng', /\p{Script=Bengali}/u, 'cs'],
++  ['Guru', /\p{Script=Gurmukhi}/u, 'cs'],
++  ['Gujr', /\p{Script=Gujarati}/u, 'cs'],
++  ['Orya', /\p{Script=Oriya}/u, 'cs'],
++  ['Taml', /\p{Script=Tamil}/u, 'cs'],
++  ['Telu', /\p{Script=Telugu}/u, 'cs'],
++  ['Knda', /\p{Script=Kannada}/u, 'cs'],
++  ['Mlym', /\p{Script=Malayalam}/u, 'cs'],
++  ['Sinh', /\p{Script=Sinhala}/u, 'cs'],
++  ['Thai', /\p{Script=Thai}/u, 'cs'],
++  ['Laoo', /\p{Script=Lao}/u, 'cs'],
++  ['Tibt', /\p{Script=Tibetan}/u, 'cs'],
++  ['Mymr', /\p{Script=Myanmar}/u, 'cs'],
++  ['Khmr', /\p{Script=Khmer}/u, 'cs'],
++];
++const HOST_LANGUAGE_SCRIPTS = {
++  ko: 'Hang', ja: 'Jpan', ar: 'Arab', fa: 'Arab', ur: 'Arab', he: 'Hebr',
++  hi: 'Deva', mr: 'Deva', ne: 'Deva', bn: 'Beng', pa: 'Guru', gu: 'Gujr',
++  or: 'Orya', ta: 'Taml', te: 'Telu', kn: 'Knda', ml: 'Mlym', si: 'Sinh',
++  th: 'Thai', lo: 'Laoo', bo: 'Tibt', my: 'Mymr', km: 'Khmr',
++};
++
++/** Contiguous effective font spans, with UTF-16 offsets matching ProseMirror. */
++export function getScriptFontSegments(text, properties, docx) {
++  const segments = [];
++  const cache = new Map();
++  let offset = 0;
++  for (const character of text) {
++    const fontFamily = resolveHostCharacterFont(character, properties, docx, cache);
++    const last = segments[segments.length - 1];
++    if (last && last.fontFamily === fontFamily) last.to += character.length;
++    else segments.push({ from: offset, to: offset + character.length, fontFamily });
++    offset += character.length;
++  }
++  return segments;
++}
++
++function resolveHostCharacterFont(character, properties, docx, cache) {
++  const fonts = properties?.fontFamily;
++  if (typeof fonts === 'string') return fonts.trim() || null;
++  if (!fonts) return null;
++  const detected = HOST_FONT_SCRIPTS.find(([, pattern]) => pattern.test(character));
++  const forcedCs = [properties.cs, properties.rtl].some((value) => value === true || value === 1 || value === '1');
++  let slot = forcedCs ? 'cs' : detected?.[2] ?? (character.codePointAt(0) < 128 ? 'ascii' : 'hAnsi');
++  const language = String(properties.lang?.[slot === 'cs' ? 'bidi' : 'eastAsia'] ?? properties.lang?.val ?? '').toLowerCase();
++  let script = detected?.[0];
++  if (!script || script === 'Hani' || forcedCs) {
++    script = language.startsWith('zh')
++      ? /(?:tw|hk|mo|hant)/.test(language) ? 'Hant' : 'Hans'
++      : HOST_LANGUAGE_SCRIPTS[language.split('-')[0]] ?? script;
++  }
++  if (fonts.hint === 'eastAsia' && !detected && character.codePointAt(0) >= 128) slot = 'eastAsia';
++  const key = `${slot}:${script ?? ''}`;
++  if (cache.has(key)) return cache.get(key);
++  const family = resolveHostFontSlot(fonts, slot, script, docx);
++  cache.set(key, family);
++  return family;
++}
++
++function resolveHostFontSlot(fonts, slot, script, docx) {
++  const themeKey = slot === 'cs' ? 'cstheme' : `${slot}Theme`;
++  const themeToken = fonts[themeKey] ?? (slot === 'cs' ? fonts.csTheme : undefined);
++  const direct = fonts[slot];
++  if (!themeToken) {
++    if (typeof direct === 'string' && direct.trim()) return direct.trim();
++    // Non-ASCII Latin characters may share the ASCII face; EA/CS slots are
++    // independent and must not silently claim the Latin face when unresolved.
++    if (slot === 'hAnsi') return resolveHostFontSlot(fonts, 'ascii', script, docx);
++    return null;
++  }
++  const theme = docx?.['word/theme/theme1.xml'];
++  const themeElements = theme?.elements?.find((node) => node.name === 'a:theme')?.elements;
++  const scheme = themeElements?.find((node) => node.name === 'a:themeElements')?.elements
++    ?.find((node) => node.name === 'a:fontScheme');
++  const prefix = String(themeToken).startsWith('minor') ? 'minor' : 'major';
++  const themeFamily = scheme?.elements?.find((node) => node.name === `a:${prefix}Font`);
++  if (!themeFamily) return null;
++  if (slot === 'ascii' || slot === 'hAnsi') {
++    return resolveDocxFontFamily({ asciiTheme: themeToken }, docx);
++  }
++  const axis = slot === 'cs' ? 'a:cs' : 'a:ea';
++  const typeface = themeFamily.elements?.find((node) => node.name === axis)?.attributes?.typeface
++    || themeFamily.elements?.find((node) => node.name === 'a:font' && node.attributes?.script === script)?.attributes?.typeface;
++  return typeof typeface === 'string' && typeface.trim() ? typeface.trim() : null;
++}
++
+ export function getFormattingStateAtPos(state, pos, editor, options = {}) {
+   const {
+     storedMarks = null,
+diff --git a/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.test.js b/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.test.js
+index 3cde35df721cf59b4fcc2b0ccc77ff518ff3d284..e98196023e749522a9eb5ed3628155136b5cf1d4 100644
+--- a/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.test.js
++++ b/packages/super-editor/src/editors/v1/core/helpers/getMarksFromSelection.test.js
+@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
+ import { EditorState, TextSelection } from 'prosemirror-state';
+ import { Schema } from 'prosemirror-model';
+ import { schema, doc, p, em, strong } from 'prosemirror-test-builder';
+-import { getMarksFromSelection, getSelectionFormattingState } from './getMarksFromSelection.js';
++import { getMarksFromSelection, getSelectionFormattingState, getHostSelectionFormattingState } from './getMarksFromSelection.js';
+ 
+ describe('getMarksFromSelection', () => {
+   it('returns marks for a collapsed selection including stored marks', () => {
+@@ -316,6 +316,70 @@ describe('getMarksFromSelection', () => {
+       expect(result.inlineRunProperties).toEqual({ bold: true });
+     });
+ 
++    it('reports only font slots used by selected text and the caret, including stored overrides', () => {
++      const testDoc = runSchema.node('doc', null, [
++        runSchema.node('paragraph', null, [
++          runSchema.node('run', {
++            runProperties: {
++              fontFamily: { ascii: 'NanumGothic', hAnsi: 'NanumGothic', eastAsia: 'NanumMyeongjo' },
++            },
++          }, [runSchema.text('Alpha 한글')]),
++        ]),
++      ]);
++      const base = EditorState.create({ schema: runSchema, doc: testDoc });
++      const editor = { converter: { convertedXml: {} } };
++      const fontAt = (from, to = from) => getHostSelectionFormattingState(
++        base.apply(base.tr.setSelection(TextSelection.create(testDoc, from, to))), editor,
++      ).hostFontFamily;
++      expect(fontAt(2, 7)).toEqual({ kind: 'uniform', value: 'NanumGothic' });
++      expect(fontAt(8, 10)).toEqual({ kind: 'uniform', value: 'NanumMyeongjo' });
++      expect(fontAt(2, 10)).toEqual({ kind: 'mixed' });
++      expect(fontAt(2)).toEqual({ kind: 'uniform', value: 'NanumGothic' });
++      const overridden = base.apply(base.tr
++        .setSelection(TextSelection.create(testDoc, 2))
++        .setStoredMarks([runSchema.marks.textStyle.create({ fontFamily: 'Arial' })]));
++      expect(getHostSelectionFormattingState(overridden, editor).hostFontFamily)
++        .toEqual({ kind: 'uniform', value: 'Arial' });
++    });
++
++    it('resolves theme-only East Asian faces and reports missing theme faces unavailable', () => {
++      const testDoc = runSchema.node('doc', null, [
++        runSchema.node('paragraph', null, [
++          runSchema.node('run', {
++            runProperties: { fontFamily: { eastAsiaTheme: 'minorEastAsia' }, lang: { eastAsia: 'ko-KR' } },
++          }, [runSchema.text('한글')]),
++        ]),
++      ]);
++      const state = EditorState.create({ schema: runSchema, doc: testDoc, selection: TextSelection.create(testDoc, 2, 4) });
++      const editor = { converter: { convertedXml: {
++        'word/theme/theme1.xml': { elements: [{ name: 'a:theme', elements: [{
++          name: 'a:themeElements', elements: [{ name: 'a:fontScheme', elements: [{
++            name: 'a:minorFont', elements: [
++              { name: 'a:ea', attributes: { typeface: '' } },
++              { name: 'a:font', attributes: { script: 'Hang', typeface: 'NanumMyeongjo' } },
++            ],
++          }] }],
++        }] }] },
++      } } };
++      expect(getHostSelectionFormattingState(state, editor).hostFontFamily)
++        .toEqual({ kind: 'uniform', value: 'NanumMyeongjo' });
++      expect(getHostSelectionFormattingState(state, { converter: { convertedXml: {} } }).hostFontFamily)
++        .toEqual({ kind: 'unavailable' });
++    });
++
++    it('uses the complex-script font for a forced-CS Latin run', () => {
++      const testDoc = runSchema.node('doc', null, [
++        runSchema.node('paragraph', null, [
++          runSchema.node('run', {
++            runProperties: { cs: true, lang: { bidi: 'ar-SA' }, fontFamily: { ascii: 'Arial', cs: 'Amiri' } },
++          }, [runSchema.text('Alpha')]),
++        ]),
++      ]);
++      const state = EditorState.create({ schema: runSchema, doc: testDoc, selection: TextSelection.create(testDoc, 2, 7) });
++      expect(getHostSelectionFormattingState(state, { converter: { convertedXml: {} } }).hostFontFamily)
++        .toEqual({ kind: 'uniform', value: 'Amiri' });
++    });
++
+     it('marks fontFamily as mixed when a range crosses runs with different fonts', () => {
+       const testDoc = runSchema.node('doc', null, [
+         runSchema.node('paragraph', null, [
+diff --git a/packages/super-editor/src/editors/v1/core/layout-adapter/converters/paragraph.ts b/packages/super-editor/src/editors/v1/core/layout-adapter/converters/paragraph.ts
+index 78a6a9450a2d46bbccb4deeb66ffc16ec4b584ca..8a294169c5354a2061343c8e250bd896923bd6bb 100644
+--- a/packages/super-editor/src/editors/v1/core/layout-adapter/converters/paragraph.ts
++++ b/packages/super-editor/src/editors/v1/core/layout-adapter/converters/paragraph.ts
+@@ -39,6 +39,9 @@ import { DEFAULT_HYPERLINK_CONFIG, TOKEN_INLINE_TYPES } from '../constants.js';
+ import { computeRunAttrs, hasExplicitParagraphRunProperties } from '../attributes/paragraph.js';
+ import { syncListMarkerFontFromParagraphRuns } from '../list-marker-font.js';
+ import { resolveRunProperties } from '@superdoc/style-engine/ooxml';
++import { getScriptFontSegments } from '../../helpers/getMarksFromSelection.js';
++import { toCssFontFamily } from '@superdoc/font-utils';
++import { decodeRPrFromMarks } from '../../super-converter/styles.js';
+ import { footnoteReferenceToBlock } from './inline-converters/footnote-reference.js';
+ import { endnoteReferenceToBlock } from './inline-converters/endnote-reference.js';
+ import {
+@@ -847,7 +850,36 @@ export function paragraphToFlowBlocks({
+                 if (tabRun.fontFamily == null) tabRun.fontFamily = defaultFont;
+                 tabOrdinal += 1;
+               }
+-              currentRuns.push(run);
++              if (node.type === 'text' && 'text' in run && run.text) {
++                const properties = activeRunProperties ?? resolveRunProperties(
++                  converterContext,
++                  decodeRPrFromMarks([...(node.marks ?? []), ...inheritedMarks]),
++                  resolvedParagraphProperties,
++                  converterContext?.tableInfo,
++                  false,
++                  false,
++                );
++                const segments = getScriptFontSegments(run.text, properties, converterContext?.docx);
++                if (segments.length <= 1) {
++                  const family = segments[0]?.fontFamily;
++                  if (family) run.fontFamily = toCssFontFamily(family)!;
++                  currentRuns.push(run);
++                } else {
++                  for (const segment of segments) {
++                    currentRuns.push({
++                      ...run,
++                      text: run.text.slice(segment.from, segment.to),
++                      fontFamily: segment.fontFamily ? toCssFontFamily(segment.fontFamily)! : run.fontFamily,
++                      ...(run.pmStart == null ? {} : {
++                        pmStart: run.pmStart + segment.from,
++                        pmEnd: run.pmStart + segment.to,
++                      }),
++                    });
++                  }
++                }
++              } else {
++                currentRuns.push(run);
++              }
+             }
+           }
+         } catch (error) {
+diff --git a/packages/super-editor/src/editors/v1/core/layout-adapter/integration.test.ts b/packages/super-editor/src/editors/v1/core/layout-adapter/integration.test.ts
+index c866f0fea2c85672638a1c15728c2ac11a9488f8..dfeea947c7ae3b760f484841f4ed2735e0db02be 100644
+--- a/packages/super-editor/src/editors/v1/core/layout-adapter/integration.test.ts
++++ b/packages/super-editor/src/editors/v1/core/layout-adapter/integration.test.ts
+@@ -53,6 +53,88 @@ const expectParagraphMeasure = (measure: Measure): ParagraphMeasure => {
+ };
+ 
+ describe('PM → FlowBlock → Measure integration', () => {
++  it.each(['hardBreak', 'newline'])('preserves %s spacing for all imported compatibility settings while justifying automatic lines', async (breakKind) => {
++    const paragraph = {
++      type: 'paragraph',
++      attrs: { paragraphProperties: { justification: 'both' } },
++      content: [
++        { type: 'run', content: [{ type: 'text', text: 'Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu' }] },
++        breakKind === 'hardBreak' ? { type: 'hardBreak' } : { type: 'run', content: [{ type: 'text', text: '\n' }] },
++        { type: 'run', content: [{ type: 'text', text: 'After break' }] },
++      ],
++    };
++    for (const setting of [undefined, { 'w:val': '0' }, {}, { 'w:val': 'on' }]) {
++      const { blocks } = toFlowBlocks({ type: 'doc', content: [paragraph] }, {
++        converterContext: {
++          ...DEFAULT_CONVERTER_CONTEXT,
++          docx: {
++            'word/settings.xml': {
++              elements: [{
++                name: 'w:settings',
++                elements: [{
++                  name: 'w:compat',
++                  elements: setting === undefined ? [] : [{ name: 'w:doNotExpandShiftReturn', attributes: setting }],
++                }],
++              }],
++            },
++          },
++        },
++      });
++      const measures = await Promise.all(blocks.map((block) => measureBlock(block, 200)));
++      const measure = expectParagraphMeasure(measures[0]);
++      const softBreakIndex = measure.lines.length - 2;
++      expect(softBreakIndex).toBeGreaterThan(0);
++      const layout = layoutDocument(blocks, measures, {
++        pageSize: { w: 240, h: 600 },
++        margins: { left: 20, right: 20, top: 20, bottom: 20 },
++      });
++      const mount = document.createElement('div');
++      const painter = createDomPainter({});
++      painter.paint({ resolvedLayout: resolveLayout({ layout, flowMode: 'paginated', blocks, measures }) }, mount);
++      const lines = Array.from(mount.querySelectorAll<HTMLElement>('.superdoc-line'));
++      const softBreakSpacing = parseFloat(lines[softBreakIndex].style.wordSpacing || '0');
++      expect(parseFloat(lines[0].style.wordSpacing)).toBeGreaterThan(0);
++      expect(softBreakSpacing).toBe(0);
++      expect(lines[lines.length - 1].style.wordSpacing).toBe('');
++    }
++  });
++
++  it('renders script-specific fonts from explicit and inherited properties with UTF-16 positions intact', () => {
++    const fontFamily = { ascii: 'NanumGothic', hAnsi: 'NanumGothic', eastAsia: 'NanumMyeongjo' };
++    for (const inherited of [false, true]) {
++      const pmDoc = {
++        type: 'doc',
++        content: [{
++          type: 'paragraph',
++          content: [{
++            type: 'run',
++            attrs: { runProperties: inherited ? {} : { fontFamily } },
++            content: [{ type: 'text', text: 'Alpha 한글😀' }],
++          }],
++        }],
++      };
++      const { blocks } = toFlowBlocks(pmDoc, {
++        converterContext: {
++          ...DEFAULT_CONVERTER_CONTEXT,
++          translatedLinkedStyles: {
++            ...DEFAULT_CONVERTER_CONTEXT.translatedLinkedStyles,
++            docDefaults: inherited ? { runProperties: { fontFamily } } : {},
++          },
++        },
++      });
++      const block = blocks[0];
++      expect(block.kind).toBe('paragraph');
++      if (block.kind !== 'paragraph') throw new Error('Expected a paragraph');
++      expect(block.runs.map((run) => 'text' in run ? run.text : '')).toEqual(['Alpha ', '한글', '😀']);
++      expect(block.runs.map((run) => 'fontFamily' in run ? run.fontFamily : '')).toEqual([
++        expect.stringContaining('NanumGothic'),
++        expect.stringContaining('NanumMyeongjo'),
++        expect.stringContaining('NanumGothic'),
++      ]);
++      expect(block.runs.map((run) => [run.pmStart, run.pmEnd])).toEqual([[2, 8], [8, 10], [10, 12]]);
++    }
++  });
++
+   it('converts PM JSON to FlowBlocks and measures them', async () => {
+     // Step 1: Convert PM JSON to FlowBlocks
+     const { blocks } = toFlowBlocks(basicParagraphFixture);
+diff --git a/packages/super-editor/src/editors/v1/core/parts/adapters/header-footer-sync.ts b/packages/super-editor/src/editors/v1/core/parts/adapters/header-footer-sync.ts
+index c95a7264088d57ca32596956553f94506496d485..b333501c5e5e186cbd2e6802461f06d62f845897 100644
+--- a/packages/super-editor/src/editors/v1/core/parts/adapters/header-footer-sync.ts
++++ b/packages/super-editor/src/editors/v1/core/parts/adapters/header-footer-sync.ts
+@@ -218,7 +218,7 @@ export function exportSubEditorToPart(
+     bodyContent = result?.elements?.[0]?.elements ?? [];
+   } catch (err) {
+     console.warn(`[header-footer-sync] Export failed for ${partId}:`, err);
+-    return false;
++    throw err;
+   }
+ 
+   // Apply to convertedXml via mutatePart
+@@ -264,7 +264,7 @@ export function exportSubEditorToPart(
+     return true;
+   } catch (err) {
+     console.warn(`[header-footer-sync] mutatePart failed for ${partId}:`, err);
+-    return false;
++    throw err;
+   }
+ }
+ 
+diff --git a/packages/super-editor/src/editors/v1/core/presentation-editor/PresentationEditor.ts b/packages/super-editor/src/editors/v1/core/presentation-editor/PresentationEditor.ts
+index 6a33f3d8c79e51ca19c7bb792dcaf497926f4cf7..d0b0926e7e9b9cfc8ea9a78ab434c50577d26ae3 100644
+--- a/packages/super-editor/src/editors/v1/core/presentation-editor/PresentationEditor.ts
++++ b/packages/super-editor/src/editors/v1/core/presentation-editor/PresentationEditor.ts
+@@ -6,7 +6,7 @@ import { HoverGroupCoordinator } from './dom/HoverGroupCoordinator.js';
+ import { ProofingSessionManager } from './proofing/ProofingSessionManager.js';
+ import { PresentationPainterAdapter } from './rendering/PresentationPainterAdapter.js';
+ import { resolveLayout } from '@superdoc/layout-resolved';
+-import type { DomPainterInput, LayoutMode, PaintSnapshot } from '@superdoc/painter-dom';
++import { createDomPainter, type DomPainterInput, type LayoutMode, type PaintSnapshot } from '@superdoc/painter-dom';
+ import type { ProofingAnnotation, ProofingConfig } from './proofing/types.js';
+ import {
+   computeWordSelectionRangeAt,
+@@ -550,6 +550,7 @@ export class PresentationEditor extends EventEmitter {
+     endnote: false,
+   };
+   #painterAdapter = new PresentationPainterAdapter();
++  #previewPaintInput: DomPainterInput | null = null;
+   #pageGeometryHelper: PageGeometryHelper | null = null;
+   #dragDropManager: DragDropManager | null = null;
+   #layoutError: LayoutError | null = null;
+@@ -3495,6 +3496,41 @@ export class PresentationEditor extends EventEmitter {
+     return this.#painterAdapter.getPaintSnapshot();
+   }
+ 
++  /**
++   * Render a detached page using the last successful paint, without changing the live viewport.
++   * The caller owns the returned DOM; document styles and fonts remain in its ownerDocument.
++   */
++  renderPagePreview(pageIndex: number): HTMLElement {
++    const input = this.#previewPaintInput;
++    if (!input) throw new Error('[PresentationEditor] No rendered document is available');
++    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= input.resolvedLayout.pages.length) {
++      throw new RangeError('[PresentationEditor] Page index is out of range');
++    }
++    const mount = this.#visibleHost.ownerDocument.createElement('div');
++    const painter = createDomPainter({
++      layoutMode: 'vertical',
++      flowMode: this.#layoutOptions.flowMode ?? 'paginated',
++      pageStyles: this.#layoutOptions.pageStyles,
++      // Retain full-document field context while mounting only the window and requested page.
++      virtualization: { enabled: true, window: 1, overscan: 0 },
++      headerProvider: this.#headerFooterSession?.headerDecorationProvider,
++      footerProvider: this.#headerFooterSession?.footerDecorationProvider,
++      showFormattingMarks: this.#layoutOptions.showFormattingMarks ?? false,
++      contentControlsChrome: this.#layoutOptions.contentControlsChrome ?? 'default',
++      resolvePhysical: (css, face) => this.#fontResolver.resolvePhysicalFamilyForFace(css, face, this.#hasFace),
++    });
++    try {
++      painter.setVirtualizationPins([pageIndex]);
++      painter.paint(input, mount);
++      const page = getPageElementByIndex(mount, pageIndex);
++      if (!page) throw new Error('[PresentationEditor] Page preview could not be rendered');
++      page.remove();
++      return page;
++    } finally {
++      painter.dispose();
++    }
++  }
++
+   /**
+    * Get the page styles for the section containing the current caret position.
+    *
+@@ -3647,7 +3683,9 @@ export class PresentationEditor extends EventEmitter {
+ 
+     this.#domIndexObserverManager?.pause();
+     try {
+-      this.#painterAdapter.paint({ resolvedLayout }, this.#painterHost);
++      const paintInput = { resolvedLayout };
++      this.#painterAdapter.paint(paintInput, this.#painterHost);
++      this.#previewPaintInput = paintInput;
+       this.#refreshEditorDomAugmentations();
+     } finally {
+       this.#domIndexObserverManager?.resume();
+@@ -5017,6 +5055,7 @@ export class PresentationEditor extends EventEmitter {
+    * Safe to call during partial initialization.
+    */
+   destroy() {
++    this.#previewPaintInput = null;
+     // Cancel pending layout RAF
+     if (this.#rafHandle != null) {
+       safeCleanup(() => {
+@@ -5664,6 +5703,7 @@ export class PresentationEditor extends EventEmitter {
+     // header/footer descriptors against the new converter and rerender so the
+     // importer tab matches the collaborator tab without waiting for an edit.
+     const handleDocumentReplaced = () => {
++      this.#previewPaintInput = null;
+       // A new document reuses this gate AND this resolver, so drop the old document's pending
+       // late-load reflow + required-face state and its runtime font mappings, then reapply the
+       // instance-level fonts config before the rerender.
+@@ -7741,6 +7781,7 @@ export class PresentationEditor extends EventEmitter {
+         resolvedLayout,
+       };
+       this.#painterAdapter.paint(paintInput, this.#painterHost, mapping ?? undefined);
++      this.#previewPaintInput = paintInput;
+       const painterPaintEnd = perfNow();
+       perfLog(`[Perf] painter.paint: ${(painterPaintEnd - painterPaintStart).toFixed(2)}ms`);
+       const painterPostStart = perfNow();
+diff --git a/packages/super-editor/src/editors/v1/core/super-converter/SuperConverter.js b/packages/super-editor/src/editors/v1/core/super-converter/SuperConverter.js
+index 740d1605aa24160349a48bc0c1d833493059617f..f9d0b44559013ada40a8f54c1e941893c40b5d5e 100644
+--- a/packages/super-editor/src/editors/v1/core/super-converter/SuperConverter.js
++++ b/packages/super-editor/src/editors/v1/core/super-converter/SuperConverter.js
+@@ -32,6 +32,7 @@ import { getWordPartRelsPath, normalizeWordPartPath } from '../helpers/word-part
+ import { COMMENT_RELATIONSHIP_TYPES } from './constants.js';
+ import {
+   createEmptyBibliographyPart,
++  ensureDocumentRelationshipsRoot,
+   loadBibliographyPartFromPackage,
+   syncBibliographyPartToPackage,
+   getBibliographyPartExportPaths,
+@@ -1315,6 +1316,9 @@ class SuperConverter {
+ 
+     if (exportJsonOnly) return result;
+ 
++    // The document relationship part is optional until the document references another part.
++    ensureDocumentRelationshipsRoot(this.convertedXml);
++
+     const exporter = new DocxExporter(this);
+     const xml = exporter.schemaToXml(result);
+ 
+@@ -1670,6 +1674,10 @@ class SuperConverter {
+         });
+       }
+ 
++      this.convertedXml[partPath].elements[0].attributes = {
++        ...DEFAULT_DOCX_DEFS,
++        ...this.convertedXml[partPath].elements[0].attributes,
++      };
+       this.convertedXml[partPath].elements[0].elements = bodyContent;
+ 
+       if (params.relationships.length) {
+@@ -1737,6 +1745,10 @@ class SuperConverter {
+         });
+       }
+ 
++      this.convertedXml[partPath].elements[0].attributes = {
++        ...DEFAULT_DOCX_DEFS,
++        ...this.convertedXml[partPath].elements[0].attributes,
++      };
+       this.convertedXml[partPath].elements[0].elements = bodyContent;
+ 
+       if (params.relationships.length) {
+diff --git a/packages/super-editor/src/editors/v1/core/super-converter/citation-sources.js b/packages/super-editor/src/editors/v1/core/super-converter/citation-sources.js
+index 757309e0798a0bcf4dd7eb7fdaed47b982397ca5..4a09bace1bb862cdc3c73858929d545f4cd29014 100644
+--- a/packages/super-editor/src/editors/v1/core/super-converter/citation-sources.js
++++ b/packages/super-editor/src/editors/v1/core/super-converter/citation-sources.js
+@@ -478,7 +478,7 @@ function getExistingDocumentRelationshipsRoot(convertedXml) {
+   return relsData.elements.find((element) => getLocalName(element.name) === 'Relationships') || null;
+ }
+ 
+-function ensureDocumentRelationshipsRoot(convertedXml) {
++export function ensureDocumentRelationshipsRoot(convertedXml) {
+   if (!convertedXml['word/_rels/document.xml.rels']) {
+     convertedXml['word/_rels/document.xml.rels'] = createXmlDocument({
+       type: 'element',
+diff --git a/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/w/pict/helpers/handle-shape-image-watermark-import.js b/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/w/pict/helpers/handle-shape-image-watermark-import.js
+index c662307a22f8675d1aa3675cb3fcbf92bc251865..e22d76ebc2b41c82a95c8ddd3c684c8789ab8d2c 100644
+--- a/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/w/pict/helpers/handle-shape-image-watermark-import.js
++++ b/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/w/pict/helpers/handle-shape-image-watermark-import.js
+@@ -44,6 +44,8 @@ export function handleShapeImageWatermarkImport({ params, pict }) {
+     console.warn(`Relationship not found for r:id="${rId}"`);
+     return null;
+   }
++  // Do not resolve external media, including same-origin relative targets.
++  if (rel.attributes?.TargetMode?.toLowerCase() === 'external') return null;
+ 
+   const targetPath = rel.attributes['Target'];
+   const normalizedPath = normalizeTargetPath(targetPath);
+diff --git a/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/wp/helpers/encode-image-node-helpers.js b/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/wp/helpers/encode-image-node-helpers.js
+index ef5a36a0dfd346ab4294360cf3561c54a3c2fcd9..d727272a66447aff2443314f9c301b9aaf35b645 100644
+--- a/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/wp/helpers/encode-image-node-helpers.js
++++ b/packages/super-editor/src/editors/v1/core/super-converter/v3/handlers/wp/helpers/encode-image-node-helpers.js
+@@ -525,6 +525,9 @@ export function handleImageNode(node, params, isAnchor) {
+   }
+ 
+   const { attributes: relAttributes } = rel;
++  // External package media must never become a browser resource request.
++  // Keep the original relationship in convertedXml for package preservation.
++  if (relAttributes.TargetMode?.toLowerCase() === 'external') return null;
+   const targetPath = relAttributes['Target'];
+ 
+   const path = normalizeTargetPath(targetPath);
+@@ -989,6 +992,7 @@ const resolveShapeGroupPicturePath = (pic, params) => {
+   const elements = relationships?.elements;
+   const rel = elements?.find((el) => el.attributes['Id'] === rEmbed);
+   if (!rel) return null;
++  if (rel.attributes?.TargetMode?.toLowerCase() === 'external') return null;
+ 
+   return normalizeTargetPath(rel.attributes?.['Target']);
+ };
+diff --git a/packages/super-editor/src/editors/v1/core/types/EditorEvents.ts b/packages/super-editor/src/editors/v1/core/types/EditorEvents.ts
+index 5f8a92075ae810851388e5fc8168e2e4bd4fc820..6a670d9f3de29bb44cfc141dd8be4ff50ae77241 100644
+--- a/packages/super-editor/src/editors/v1/core/types/EditorEvents.ts
++++ b/packages/super-editor/src/editors/v1/core/types/EditorEvents.ts
+@@ -214,11 +214,14 @@ export interface EditorEventMap extends DefaultEventMap {
+   /** Called when editor content updates */
+   update: [{ editor: Editor; transaction: Transaction }];
+ 
++  /** Persisted document or native package state changed (not selection-only updates). */
++  'host-mutation': [{ editor: Editor; source: 'document' | 'parts' | 'comments' }];
++
+   /** Called when selection updates */
+   selectionUpdate: [{ editor: Editor; transaction: Transaction }];
+ 
+   /** Called when a transaction is processed */
+-  transaction: [{ editor: Editor; transaction: Transaction; duration?: number }];
++  transaction: [{ editor: Editor; transaction: Transaction; appliedTransactions?: readonly Transaction[]; duration?: number }];
+ 
+   /** Called when editor gets focus */
+   focus: [{ editor: Editor; event: FocusEvent; transaction: Transaction }];
+diff --git a/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/header-footer-story-runtime.ts b/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/header-footer-story-runtime.ts
+index 4bc86f927229c3cebc5bd5b75f220e1e71242237..c5b672112805bb05e5c67ee344d5f7a0126db2d7 100644
+--- a/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/header-footer-story-runtime.ts
++++ b/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/header-footer-story-runtime.ts
+@@ -324,7 +324,9 @@ export function resolveHeaderFooterPartRuntime(
+  * immediately for the in-memory runtime that performed the export.
+  */
+ function exportAndSyncCache(hostEditor: Editor, subEditor: Editor, refId: string, hfType: 'header' | 'footer'): void {
+-  exportSubEditorToPart(hostEditor, subEditor, refId, hfType);
++  if (!exportSubEditorToPart(hostEditor, subEditor, refId, hfType)) {
++    throw new Error(`Cannot persist ${hfType} story ${refId}.`);
++  }
+ 
+   const conv = getConverter(hostEditor);
+   if (!conv) return;
+diff --git a/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/live-story-session-runtime-registry.ts b/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/live-story-session-runtime-registry.ts
+index 95c56c91f28961666e7dec0b0fbe29d354c8f7c4..3326b7b9a3d457e140ebb9636888a36eea335253 100644
+--- a/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/live-story-session-runtime-registry.ts
++++ b/packages/super-editor/src/editors/v1/document-api-adapters/story-runtime/live-story-session-runtime-registry.ts
+@@ -12,6 +12,7 @@ interface LiveStorySessionRegistration {
+   storyKey: string;
+   editor: Editor;
+   runtime: StoryRuntime;
++  stopRelaying: () => void;
+ }
+ 
+ const liveSessionsByHost = new WeakMap<Editor, Map<string, LiveStorySessionRegistration>>();
+@@ -50,11 +51,17 @@ function buildLiveSessionRuntime(registration: LiveStorySessionRegistration): St
+ export function registerLiveStorySessionRuntime(hostEditor: Editor, runtime: StoryRuntime, editor: Editor): () => void {
+   const sessions = getOrCreateLiveSessionMap(hostEditor);
+   const storyKey = runtime.storyKey;
++  sessions.get(storyKey)?.stopRelaying();
++  const relay = (payload: { editor: Editor; source: 'document' | 'parts' | 'comments' }) => {
++    hostEditor.emit('host-mutation', payload);
++  };
++  editor.on('host-mutation', relay);
+ 
+   sessions.set(storyKey, {
+     storyKey,
+     editor,
+     runtime,
++    stopRelaying: () => editor.off('host-mutation', relay),
+   });
+ 
+   return () => {
+@@ -71,6 +78,11 @@ export function resolveLiveStorySessionRuntime(hostEditor: Editor, storyKey: str
+   return buildLiveSessionRuntime(registration);
+ }
+ 
++/** Living interactive stories whose DOM input must settle before export. */
++export function getLiveStorySessionEditors(hostEditor: Editor): Editor[] {
++  return Array.from(liveSessionsByHost.get(hostEditor)?.values() ?? [], ({ editor }) => editor);
++}
++
+ /**
+  * Commits all currently active live story sessions for a host editor.
+  *
+@@ -89,7 +101,12 @@ export function commitLiveStorySessionRuntimes(hostEditor: Editor): number {
+   }
+ 
+   let committedCount = 0;
++  for (const { editor } of sessions.values()) {
++    if (editor.view?.composing) throw new Error('Cannot commit a story while IME composition is active.');
++  }
+   for (const registration of [...sessions.values()]) {
++    const input = registration.editor.flushPendingInputForHost();
++    if (!input.ok) throw new Error('Cannot commit a story while IME composition is active.');
+     buildLiveSessionRuntime(registration).commit?.(hostEditor);
+     committedCount += 1;
+   }
+@@ -112,6 +129,7 @@ export function unregisterLiveStorySessionRuntime(hostEditor: Editor, storyKey:
+   if (!registration) return;
+   if (editor && registration.editor !== editor) return;
+ 
++  registration.stopRelaying();
+   sessions.delete(storyKey);
+ 
+   if (sessions.size === 0) {
+diff --git a/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.js b/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.js
+index 5238b11020e8d7122c7e2c55698d5ef0b24b0bb4..5b8ef1788015707f8337bbd1df218cb67ab37d83 100644
+--- a/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.js
++++ b/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.js
+@@ -6,7 +6,7 @@ import { Attribute } from '@core/Attribute.js';
+ import { defaultBlockAt } from '@core/helpers/defaultBlockAt.js';
+ import { getSplitRunProperties, syncSplitParagraphRunProperties } from '@core/helpers/splitParagraphRunProperties.js';
+ import {
+-  clearInheritedLinkedStyleId,
++  resolveNextParagraphStyle,
+   isLinkedParagraphStyleId,
+   isLinkedCharacterStyleId,
+ } from '@core/commands/linkedStyleSplitHelpers.js';
+@@ -218,6 +218,7 @@ export function splitBlockPatch(state, dispatch, editor) {
+     paragraphAttrs = null,
+     atEnd = false,
+     atStart = false,
++    styleChanged = false,
+     tableInfo = null;
+   for (let d = $from.depth; d > 0; d--) {
+     let node = $from.node(d);
+@@ -229,18 +230,19 @@ export function splitBlockPatch(state, dispatch, editor) {
+         const sourceParagraphStyleId = node.attrs?.paragraphProperties?.styleId;
+         const extensionAttrs = editor?.extensionService?.attributes ?? [];
+         paragraphAttrs = Attribute.getSplittedAttributes(extensionAttrs, node.type.name, node.attrs);
+-        paragraphAttrs = clearInheritedLinkedStyleId(paragraphAttrs, editor, { emptyParagraph: atEnd });
++        paragraphAttrs = resolveNextParagraphStyle(paragraphAttrs, editor, { emptyParagraph: atEnd });
++        styleChanged = paragraphAttrs?.paragraphProperties?.styleId !== sourceParagraphStyleId;
+ 
+         // When splitting at the end (creating an empty new paragraph), store the
+         // current run's runProperties on the new paragraph so the toolbar and
+         // wrapTextInRunsPlugin know which inline formatting to inherit.
+         if (atEnd && $from.parent.type.name === 'run') {
+-          if (!isLinkedParagraphStyleId(editor, sourceParagraphStyleId)) {
++          if (!styleChanged) {
+             paragraphAttrs = syncSplitParagraphRunProperties(paragraphAttrs, getSplitRunProperties(state, $from));
+           }
+           const pp = paragraphAttrs?.paragraphProperties;
+           const runStyleIsLinkedCharacter = isLinkedCharacterStyleId(editor, pp?.runProperties?.styleId);
+-          if (pp && (isLinkedParagraphStyleId(editor, sourceParagraphStyleId) || runStyleIsLinkedCharacter)) {
++          if (pp && (styleChanged || (runStyleIsLinkedCharacter && !isLinkedParagraphStyleId(editor, sourceParagraphStyleId)))) {
+             const nextPp = { ...pp };
+             delete nextPp.runProperties;
+             paragraphAttrs = { ...paragraphAttrs, paragraphProperties: nextPp };
+@@ -288,7 +290,7 @@ export function splitBlockPatch(state, dispatch, editor) {
+     }
+   }
+ 
+-  applyStyleMarks(state, tr, editor, paragraphAttrs, tableInfo);
++  applyStyleMarks(state, tr, editor, paragraphAttrs, tableInfo, styleChanged);
+   if (splitDepth) {
+     addTrackedParagraphSplitMark({
+       state,
+@@ -306,7 +308,7 @@ export function splitBlockPatch(state, dispatch, editor) {
+ /**
+  * Applies style-based marks to a transaction after a block split operation.
+  * Resolves run properties from paragraph styles and converts them to editor marks.
+- * If the selection already has marks, those take precedence over style-based marks.
++ * Selection marks take precedence unless w:next changes the paragraph style.
+  *
+  * @param {import('prosemirror-state').EditorState} state - The current editor state.
+  * @param {import('prosemirror-state').Transaction} tr - The transaction to modify with marks.
+@@ -319,6 +321,7 @@ export function splitBlockPatch(state, dispatch, editor) {
+  *   numCells: number,
+  *   numRows: number,
+  * }|null} tableInfo - Information about the table context if the split is occurring within a table cell.
++ * @param {boolean} styleChanged - Whether this split transitions to a different paragraph style.
+  * @returns {void}
+  *
+  * @remarks
+@@ -333,9 +336,12 @@ export function splitBlockPatch(state, dispatch, editor) {
+  * Error handling: Failures are silently ignored to ensure typing continues to work
+  * even if style resolution fails. This is intentional defensive programming.
+  */
+-function applyStyleMarks(state, tr, editor, paragraphAttrs, tableInfo) {
++function applyStyleMarks(state, tr, editor, paragraphAttrs, tableInfo, styleChanged) {
+   const styleId = paragraphAttrs?.paragraphProperties?.styleId;
+-  const explicitStoredMarks = state.storedMarks;
++  // Stored marks describe typing in the old paragraph. A w:next transition
++  // must resolve the destination style instead of reapplying the source font.
++  const explicitStoredMarks = styleChanged ? null : state.storedMarks;
++  if (styleChanged) tr.setStoredMarks([]);
+   const hasExplicitStyleReset =
+     paragraphAttrs?.paragraphProperties &&
+     Object.prototype.hasOwnProperty.call(paragraphAttrs.paragraphProperties, 'styleId') &&
+@@ -386,7 +392,7 @@ function applyStyleMarks(state, tr, editor, paragraphAttrs, tableInfo) {
+     // Use the post-split selection on `tr`. `state.selection` still points at the pre-split
+     // cursor (e.g. end of styled text), which would incorrectly re-apply marks like textStyle
+     // onto a new empty paragraph after Enter.
+-    const selectionMarks = tr.selection?.$from?.marks ? tr.selection.$from.marks() : [];
++    const selectionMarks = !styleChanged && tr.selection?.$from?.marks ? tr.selection.$from.marks() : [];
+     const selectionMarkDefs = selectionMarks.map((mark) => ({ type: mark.type.name, attrs: mark.attrs }));
+ 
+     /** @type {Array<{type: string, attrs: Record<string, unknown>}>} */
+diff --git a/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.test.js b/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.test.js
+index d0a67a8e6303628c21d95419c5afd624d30f436b..16e9c1bf05e1a60ae8a0eb2c57720fd4f87471dd 100644
+--- a/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.test.js
++++ b/packages/super-editor/src/editors/v1/extensions/run/commands/split-run.test.js
+@@ -451,8 +451,10 @@ describe('splitRunToParagraph with style marks', () => {
+           styleId: 'Heading1',
+           type: 'paragraph',
+           link: 'Heading1Char',
++          next: 'Normal',
+           ...(runProperties ? { runProperties } : {}),
+         },
++        Normal: { styleId: 'Normal', type: 'paragraph', runProperties: {} },
+       },
+     },
+   });
+@@ -612,7 +614,7 @@ describe('splitRunToParagraph with style marks', () => {
+     expect(storedMarkTypes).not.toContain('bold');
+   });
+ 
+-  it('does not inherit linked paragraph styles onto the new empty paragraph', () => {
++  it('uses the declared next paragraph style at the end of a heading', () => {
+     const linkedStyleConverter = createHeadingLinkedStyleConverter();
+ 
+     editor.converter = linkedStyleConverter;
+@@ -632,7 +634,7 @@ describe('splitRunToParagraph with style marks', () => {
+ 
+     expect(paragraphs).toHaveLength(2);
+     expect(paragraphs[0].attrs?.paragraphProperties?.styleId).toBe('Heading1');
+-    expect(paragraphs[1].attrs?.paragraphProperties?.styleId).toBeNull();
++    expect(paragraphs[1].attrs?.paragraphProperties?.styleId).toBe('Normal');
+   });
+ 
+   it('preserves linked paragraph styles when splitting text into two non-empty paragraphs', () => {
+@@ -814,6 +816,95 @@ describe('splitRunToParagraph with style marks', () => {
+     expect(paragraphs[1].attrs?.paragraphProperties?.styleId).toBe('BodyText');
+   });
+ 
++  it.each([undefined, 'TextBody'])('keeps linked body font and direct formatting with next=%s', (next) => {
++    editor.converter = {
++      ...BASE_CONVERTER,
++      translatedLinkedStyles: {
++        docDefaults: { runProperties: {} },
++        styles: {
++          TextBody: {
++            type: 'paragraph',
++            link: 'TextBodyChar',
++            next,
++            runProperties: { fontFamily: { ascii: 'Arial', hAnsi: 'Arial' } },
++          },
++        },
++      },
++    };
++    loadDoc({
++      type: 'doc',
++      content: [{
++        type: 'paragraph',
++        attrs: { paragraphProperties: { styleId: 'TextBody' } },
++        content: [{
++          type: 'run',
++          attrs: { runProperties: { italic: true } },
++          content: [{ type: 'text', text: 'Body' }],
++        }],
++      }],
++    }, { plugins: true });
++    updateSelection(findTextPos('Body') + 4);
++    expect(editor.commands.splitRunToParagraph()).toBe(true);
++    editor.commands.insertContent('Continued');
++    const paragraph = editor.state.doc.child(1);
++    expect(paragraph.attrs.paragraphProperties.styleId).toBe('TextBody');
++    expect(paragraph.textContent).toBe('Continued');
++    const marks = [];
++    paragraph.descendants((node) => {
++      if (node.isText) marks.push(...node.marks);
++    });
++    expect(marks.find((mark) => mark.type.name === 'textStyle')?.attrs.fontFamily).toContain('Arial');
++    expect(marks.some((mark) => mark.type.name === 'italic')).toBe(true);
++  });
++
++  it('uses next style when Enter splits an empty paragraph through the fallback command', () => {
++    editor.converter = createHeadingLinkedStyleConverter({ runProperties: { bold: true } });
++    loadDoc({
++      type: 'doc',
++      content: [{
++        type: 'paragraph',
++        attrs: { paragraphProperties: { styleId: 'Heading1', runProperties: { bold: true } } },
++      }],
++    });
++    updateSelection(1);
++    expect(editor.commands.splitBlock()).toBe(true);
++    editor.commands.insertContent('Body');
++    const paragraph = editor.state.doc.child(1);
++    expect(paragraph.attrs.paragraphProperties.styleId).toBe('Normal');
++    expect(paragraph.textContent).toBe('Body');
++    paragraph.descendants((node) => {
++      if (node.isText) expect(node.marks.some((mark) => mark.type.name === 'bold')).toBe(false);
++    });
++  });
++
++  it.each(['splitRunToParagraph', 'splitBlock'])('uses next-style font instead of source stored marks via %s', (command) => {
++    editor.converter = createHeadingLinkedStyleConverter({
++      runProperties: { bold: true, fontFamily: { ascii: 'Times New Roman', hAnsi: 'Times New Roman' } },
++    });
++    editor.converter.translatedLinkedStyles.styles.Normal.runProperties = {
++      fontFamily: { ascii: 'Arial', hAnsi: 'Arial' },
++    };
++    loadDoc(command === 'splitRunToParagraph' ? STYLED_PARAGRAPH_DOC : {
++      type: 'doc',
++      content: [{ type: 'paragraph', attrs: { paragraphProperties: { styleId: 'Heading1' } } }],
++    }, { plugins: true });
++    updateSelection(command === 'splitRunToParagraph' ? findTextPos('Heading Text') + 'Heading Text'.length : 1);
++    editor.view.dispatch(editor.state.tr.setStoredMarks([
++      editor.schema.marks.bold.create(),
++      editor.schema.marks.textStyle.create({ fontFamily: 'Times New Roman' }),
++    ]));
++    expect(editor.commands[command]()).toBe(true);
++    editor.commands.insertContent('Body');
++    const paragraph = editor.state.doc.child(1);
++    expect(paragraph.attrs.paragraphProperties.styleId).toBe('Normal');
++    expect(paragraph.textContent).toBe('Body');
++    paragraph.descendants((node) => {
++      if (!node.isText) return;
++      expect(node.marks.some((mark) => mark.type.name === 'bold')).toBe(false);
++      expect(node.marks.find((mark) => mark.type.name === 'textStyle')?.attrs.fontFamily).toContain('Arial');
++    });
++  });
++
+   it('handles missing converter gracefully during split', () => {
+     const mockConverter = {
+       convertedXml: {},
+diff --git a/packages/superdoc/src/core/SuperDoc.test.js b/packages/superdoc/src/core/SuperDoc.test.js
+index f44db7bc66b27d1d56200aaaef2abd4f6565ce21..15d590f88f4c92e16f95bb49444c35ccf1346811 100644
+--- a/packages/superdoc/src/core/SuperDoc.test.js
++++ b/packages/superdoc/src/core/SuperDoc.test.js
+@@ -1202,8 +1202,9 @@ describe('SuperDoc core', () => {
+     expect(createDownloadMock).toHaveBeenCalledWith(expect.any(Object), 'Test-Export', 'zip');
+   });
+ 
+-  it('falls back to original document data when an editor export yields no blob', async () => {
+-    const { superdocStore } = createAppHarness();
++  it.each([null, new Blob([])])('rejects missing or zero-byte export instead of imported data (%s)', async (output) => {
++    createAppHarness();
++    const onException = vi.fn();
+ 
+     const instance = new SuperDoc({
+       selector: '#host',
+@@ -1212,12 +1213,12 @@ describe('SuperDoc core', () => {
+       modules: { comments: {}, toolbar: {} },
+       colors: [],
+       user: { name: 'Jane', email: 'jane@example.com' },
+-      onException: vi.fn(),
++      onException,
+     });
+     await flushMicrotasks();
+ 
+     const originalBlob = { name: 'fallback.docx' };
+-    const exportDocxMock = vi.fn().mockResolvedValue(undefined);
++    const exportDocxMock = vi.fn().mockResolvedValue(output);
+ 
+     instance.superdocStore.documents = [
+       {
+@@ -1228,13 +1229,14 @@ describe('SuperDoc core', () => {
+       },
+     ];
+ 
+-    const results = await instance.exportEditorsToDOCX();
+-
+-    expect(exportDocxMock).toHaveBeenCalledTimes(1);
+-    expect(results).toEqual([originalBlob]);
++    await expect(instance.exportEditorsToDOCX()).rejects.toBeInstanceOf(Error);
++    expect(onException).toHaveBeenCalledWith({
++      error: expect.any(Error),
++      document: instance.superdocStore.documents[0],
++    });
+   });
+ 
+-  it('falls back to original document data and keeps sibling exports when an editor export rejects', async () => {
++  it('rejects the whole export when one editor fails even if a sibling succeeds', async () => {
+     createAppHarness();
+     const onException = vi.fn();
+ 
+@@ -1269,11 +1271,7 @@ describe('SuperDoc core', () => {
+ 
+     instance.superdocStore.documents = [failedDoc, siblingDoc];
+ 
+-    const results = await instance.exportEditorsToDOCX();
+-
+-    expect(failedExportDocxMock).toHaveBeenCalledTimes(1);
+-    expect(siblingExportDocxMock).toHaveBeenCalledTimes(1);
+-    expect(results).toEqual([originalBlob, siblingBlob]);
++    await expect(instance.exportEditorsToDOCX()).rejects.toBe(exportError);
+     expect(onException).toHaveBeenCalledTimes(1);
+     expect(onException).toHaveBeenCalledWith({ error: exportError, document: failedDoc });
+   });
+@@ -1311,16 +1309,14 @@ describe('SuperDoc core', () => {
+       },
+     ];
+ 
+-    const results = await instance.exportEditorsToDOCX();
+-
+-    expect(editor.exportDocx).toHaveBeenCalledTimes(1);
+-    expect(results).toEqual([originalBlob]);
++    await expect(instance.exportEditorsToDOCX()).rejects.toBe(exportError);
+     expect(onException).toHaveBeenCalledTimes(1);
+     expect(onException).toHaveBeenCalledWith({ error: exportError, editor });
+   });
+ 
+-  it('drops non-DOCX fallback data when an editor export yields no blob', async () => {
+-    const { superdocStore } = createAppHarness();
++  it('rejects a DOCX without a live editor instead of returning imported data', async () => {
++    createAppHarness();
++    const onException = vi.fn();
+ 
+     const instance = new SuperDoc({
+       selector: '#host',
+@@ -1329,25 +1325,24 @@ describe('SuperDoc core', () => {
+       modules: { comments: {}, toolbar: {} },
+       colors: [],
+       user: { name: 'Jane', email: 'jane@example.com' },
+-      onException: vi.fn(),
++      onException,
+     });
+     await flushMicrotasks();
+ 
+-    const exportDocxMock = vi.fn().mockResolvedValue(undefined);
+-
+     instance.superdocStore.documents = [
+       {
+         id: 'doc-1',
+         type: DOCX,
+-        data: new Blob(['pdf'], { type: PDF }),
+-        getEditor: () => ({ exportDocx: exportDocxMock }),
++        data: new Blob(['original'], { type: DOCX }),
++        getEditor: () => null,
+       },
+     ];
+ 
+-    const results = await instance.exportEditorsToDOCX();
+-
+-    expect(exportDocxMock).toHaveBeenCalledTimes(1);
+-    expect(results).toEqual([]);
++    await expect(instance.exportEditorsToDOCX()).rejects.toBeInstanceOf(Error);
++    expect(onException).toHaveBeenCalledWith({
++      error: expect.any(Error),
++      document: instance.superdocStore.documents[0],
++    });
+   });
+ 
+   it('passes comments: undefined when the UI store is unhydrated (modules.comments: false)', async () => {
+diff --git a/packages/superdoc/src/core/SuperDoc.ts b/packages/superdoc/src/core/SuperDoc.ts
+index 36325d673a4d5276372913f54429e601359a4b84..d23a56ac1507d77607f2c10945fc034ad5a8e741 100644
+--- a/packages/superdoc/src/core/SuperDoc.ts
++++ b/packages/superdoc/src/core/SuperDoc.ts
+@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
+ import { markRaw, toRaw } from 'vue';
+ import { HocuspocusProviderWebsocket } from '@hocuspocus/provider';
+ 
+-import { DOCX, PDF, HTML, getActorIdentityKey, normalizeActorEmail } from '@superdoc/common';
++import { DOCX, PDF, HTML, getActorIdentityKey, normalizeActorEmail, comments_module_events } from '@superdoc/common';
+ import { SuperToolbar, createZip, seedEditorStateToYDoc, onCollaborationProviderSynced } from '@superdoc/super-editor';
+ import { SuperComments } from '../components/CommentsLayer/commentsList/super-comments-list.js';
+ import { resolveFitWidthOptions } from '../composables/use-viewport-fit.js';
+@@ -515,6 +515,13 @@ export class SuperDoc extends EventEmitter<SuperDocEventMap> {
+   };
+   constructor(config: Config) {
+     super();
++    this.on('comments-update', (event) => {
++      if (event.type === comments_module_events.PENDING || event.type === comments_module_events.SELECTED) return;
++      for (const doc of this.superdocStore?.documents ?? []) {
++        const editor = doc.getEditor?.();
++        editor?.emit('host-mutation', { editor, source: 'comments' });
++      }
++    });
+ 
+     if (!config.selector) {
+       throw new Error('SuperDoc: selector is required');
+@@ -2663,29 +2670,25 @@ export class SuperDoc extends EventEmitter<SuperDocEventMap> {
+           if (!doc || doc.type !== DOCX) return null;
+ 
+           const editor = typeof doc.getEditor === 'function' ? doc.getEditor() : null;
+-          const fallbackDocx = () => {
+-            if (!doc.data) return null;
+-            if (doc.data.type && doc.data.type !== DOCX) return null;
+-            return doc.data;
+-          };
+-
+-          if (!editor) return fallbackDocx();
+ 
+           try {
++            if (!editor) throw new Error('Cannot export DOCX: document editor is unavailable.');
+             const exported = await editor.exportDocx({
+               isFinalDoc,
+               comments: comments as import('@superdoc/super-editor').Comment[] | undefined,
+               commentsType,
+               fieldsHighlightColor,
+             });
+-            if (exported) return exported;
++            if (!(exported instanceof Blob) || exported.size === 0) {
++              throw new Error('Cannot export DOCX: editor returned an empty or invalid document.');
++            }
++            return exported;
+           } catch (error) {
+             if (!error || typeof error !== 'object' || !bridgedExportErrors.has(error)) {
+               this.emit('exception', { error, document: doc });
+             }
++            throw error;
+           }
+-
+-          return fallbackDocx();
+         },
+       );
+ 
+diff --git a/pdfeditor-provenance.json b/pdfeditor-provenance.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..da02dc5e7dc9f85e280d8603e873450f280c16bb
+--- /dev/null
++++ b/pdfeditor-provenance.json
+@@ -0,0 +1,19 @@
++{
++  "repository": "https://github.com/superdoc/docx-editor",
++  "revision": "e096323e7d5e54f95b4817d1d3aefde8c37d52cf",
++  "archiveUrl": "https://codeload.github.com/superdoc/docx-editor/tar.gz/e096323e7d5e54f95b4817d1d3aefde8c37d52cf",
++  "archiveSha256": "55e65b98203ee31c9f608ac99e9924cdb220a7dfdaa2b5a23e7f20de8188eb35",
++  "version": "1.46.3",
++  "license": "AGPL-3.0",
++  "licenseFiles": [
++    "LICENSE",
++    "THIRD_PARTY_LICENSES.md"
++  ],
++  "packageManager": "pnpm@10.25.0",
++  "sourcePatches": [
++    "This directory is a modified working-tree fork of the pinned archive, not pristine upstream source. Distribute this corresponding patched source, lockfiles, and build scripts with the application.",
++    "The Office host bridge exposes effective selection formatting, story-aware input/export barriers, content mutation notifications, composition state, and selection-preserving commands.",
++    "DOCX export rejects unavailable, failed, null, and empty editor output rather than returning stale original bytes; optional package parts and edited header/footer namespace declarations are preserved correctly.",
++    "Rendering and formatting retain Latin/East Asian font distinctions and explicit inherited-format negations. Product runtime disables external media auto-fetch and uses locally hosted licensed fonts."
++  ]
++}
