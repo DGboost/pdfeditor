@@ -6,13 +6,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 3000",
-    "build": "tsc --noEmit && vite build",
+    "engines:build": "node scripts/build-engines.mjs",
+    "build": "npm run engines:build && tsc --noEmit && vite build",
     "preview": "vite preview --port 3000",
     "start": "vite --port 3000",
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@noble/hashes": "2.0.1",
+    "cfb": "1.2.2",
+    "fflate": "0.8.3",
     "lucide-react": "1.47.0",
     "mupdf": "1.28.1",
     "react": "^18.3.1",

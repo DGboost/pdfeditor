@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import type { Workspace } from '../types/pdfEditor';
 import type { PdfDocumentController } from './usePdfDocument';
+import { modifiedFileName } from '../documents/files';
 
 export interface UseExportPdfOptions {
   engine: PdfDocumentController;
@@ -22,7 +23,7 @@ export function useExportPdf({ engine, getSnapshot, setBusy, showToast }: UseExp
       const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = (snapshot.workspace.fileName || 'document').replace(/\.pdf$/i, '') + '_수정본.pdf';
+      link.download = modifiedFileName(snapshot.workspace.fileName, 'pdf');
       document.body.appendChild(link);
       try { link.click(); }
       finally {

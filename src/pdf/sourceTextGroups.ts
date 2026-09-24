@@ -35,8 +35,20 @@ export function buildSourceTextGroup(page: PdfPage, source: SourceTextPage, line
   for (const item of ordered) {
     const row = rows.at(-1);
     if (row && Math.abs(row[0].v - item.v) < .5) {
-      const gap = item.u - row.at(-1)!.end;
-      if (gap < -.5 || gap > size * 1.5) throw new Error('서로 떨어진 열이나 표 셀은 묶을 수 없습니다.');
+      const previous = row.at(-1)!;
+      const gap = item.u - previous.end;
+      let safeMetricOverlap = false;
+      if (gap < -.5) {
+        const last = previous.line.chars.at(-1), first = item.line.chars[0];
+        // Only boundary-glyph side bearings may overlap, never painted text or whole glyph cells.
+        safeMetricOverlap = !!last && !!first
+          && [previous.line, item.line].every(line => line.chars.every(char => char.paintBounds?.every(Number.isFinite)))
+          && [last, first].every(char => char.paintBounds![0] < char.paintBounds![2] && char.paintBounds![1] < char.paintBounds![3])
+          && previous.ink[2] <= item.ink[0]
+          && item.u > Math.max(previous.u, project(last.origin)[0])
+          && previous.end < Math.min(item.end, Math.max(...[0, 2, 4, 6].map(i => project([first.quad[i], first.quad[i + 1]])[0])));
+      }
+      if ((gap < -.5 && !safeMetricOverlap) || gap > size * 1.5) throw new Error('서로 떨어진 열이나 표 셀은 묶을 수 없습니다.');
       row.push(item);
     } else rows.push([item]);
   }

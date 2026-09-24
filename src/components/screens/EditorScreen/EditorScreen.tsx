@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ArrowLeftRight, BookOpen, ChevronLeft, ChevronRight, Download, FileText, Hand, LayoutGrid, Minus, MousePointer2, Plus, Redo2, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, BookOpen, ChevronLeft, ChevronRight, Hand, LayoutGrid, Minus, MousePointer2, Plus, Redo2, Undo2 } from 'lucide-react';
 import type { DocumentState, DownloadedFontAsset, EditController, Page, TextContent, Tool, Workspace } from '../../../types/pdfEditor';
 import type { DocumentActions } from '../../../hooks/useDocumentReducer';
 import type { PdfDocumentController } from '../../../hooks/usePdfDocument';
@@ -8,10 +8,11 @@ import type { EditableTextTarget, RenderedPage, SourceFontInfo, SourceTextLine }
 import type { SaveStatus } from '../../../utils/db';
 import { plainText } from '../../../pdf/textEditing';
 import { buildSourceTextGroup } from '../../../pdf/sourceTextGroups';
-import { ACCENT, BORDER, BORDER_STRONG, DANGER, PANEL_SHADOW, SURFACE, TEXT, TEXT_SUBTLE, CANVAS_BG, TOOLBAR_H, RAIL_CARD_H, solidAccentBtn, toolBase, toolActive } from '../../../styles/theme';
+import { ACCENT, BORDER, BORDER_STRONG, PANEL_SHADOW, SURFACE, TEXT, TEXT_SUBTLE, CANVAS_BG, TOOLBAR_H, RAIL_CARD_H, toolBase, toolActive } from '../../../styles/theme';
 import { PdfPageSurface } from './PdfPageSurface';
 import { PageThumbnail } from './GridView';
 import { TextEditPanel } from './TextEditPanel';
+import { DocumentHeader } from '../../editor/DocumentHeader';
 
 export interface EditorScreenProps {
   workspace: Workspace; revision: number; engine: PdfDocumentController; docActions: DocumentActions;
@@ -22,7 +23,7 @@ export interface EditorScreenProps {
   onDuplicatePage: (id: string) => void; onRotatePage: (id: string, delta: number) => void; onDeletePage: (id: string) => void;
   onAddPage: () => void; onReorderPages: (from: string, to: string) => void; onThumbClick: (id: string) => void;
   activeTool: Tool; setActiveTool: (t: Tool) => void;
-  onFileNameChange: (s: string) => void; saveStatus: SaveStatus; onRetrySave: () => void;
+  onFileNameChange: (s: string) => void; saveStatus: SaveStatus; saveError: string | null; onRetrySave: () => void;
   hasUnappliedEdit: boolean; onUnappliedEditChange: (v: boolean) => void;
   registerEditController: (c: EditController | null) => void;
 }
@@ -195,6 +196,49 @@ export function EditorScreen(p: EditorScreenProps) {
     selectedSources.current = [committedTarget];
     setEdit(null); setCandidate(null); p.onUnappliedEditChange(false);
   };
+  const mergeSelectedText = async () => {
+    const lineIds = [...new Set(selectedSources.current.flatMap(target => target.lineIds))];
+    if (lineIds.length < 2 || !selection || selection.kind !== 'source') return;
+    const pageId = selectionPage.current;
+    const workspaceId = latest.current.workspace.id;
+    const sessionId = latest.current.engine.sessionId;
+    const epoch = selectionEpoch.current;
+    const stillCurrent = (revision?: number) => {
+      const state = latest.current.getDocumentState();
+      const selectedIds = new Set(selectedSources.current.flatMap(target => target.lineIds));
+      return selectionPage.current === pageId && selectionEpoch.current === epoch
+        && latest.current.workspace.id === workspaceId && latest.current.engine.sessionId === sessionId
+        && state.workspace?.activePageId === pageId && !latest.current.isExporting
+        && selectedIds.size === lineIds.length && lineIds.every(id => selectedIds.has(id))
+        && (revision === undefined || state.revision === revision);
+    };
+    if (!await flush() || !stillCurrent()) return;
+    const state = latest.current.getDocumentState();
+    const page = state.workspace?.pages.find(item => item.id === pageId);
+    if (page?.kind !== 'pdf') return;
+    try {
+      const source = await latest.current.engine.text(page.sourcePageIndex);
+      if (!stillCurrent(state.revision)) return;
+      const group = buildSourceTextGroup(page, source, lineIds);
+      const groupedEdit = { lineIds: group.lineIds, content: group.content, widthPt: group.widthPt, layout: group.layout };
+      const members = new Set(group.lineIds);
+      const candidate = { ...page, textEdits: [...page.textEdits.filter(item => !item.lineIds.some(id => members.has(id))), groupedEdit] };
+      const result = await latest.current.engine.validate(candidate, state.revision, state.revision + 1);
+      if (!stillCurrent(state.revision)) return;
+      if (!result.ok) { latest.current.showToast(result.message); return; }
+      latest.current.docActions.upsertTextEdit(pageId, groupedEdit);
+      const merged: Extract<EditableTextTarget, { kind: 'source' }> = { kind: 'source', ...group, editable: true };
+      selectedSources.current = [merged];
+      setSelection(merged);
+      setSourceSelections([merged]);
+      setEdit(null);
+      setCandidate(null);
+      latest.current.onUnappliedEditChange(false);
+      latest.current.showToast('선택한 텍스트를 하나의 객체로 묶었습니다.');
+    } catch (error) {
+      if (stillCurrent()) latest.current.showToast(error instanceof Error ? error.message : '텍스트를 묶을 수 없습니다.');
+    }
+  };
   const copy = async () => {
     if (!engine.info?.canCopy || !selection) return;
     try {
@@ -229,15 +273,9 @@ export function EditorScreen(p: EditorScreenProps) {
     return () => observer.disconnect();
   }, [panelBounds]);
   return <div className="pdfe-screen-enter" data-screen-label="편집기" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-    <header className="pdfe-editor-header" style={{ position: 'relative', display: 'flex', alignItems: 'center', borderBottom: `1px solid ${BORDER}`, background: SURFACE }}>
-      <button className="pdfe-brand" onClick={p.goToUpload} style={{ background: 'var(--pdfe-button-bg, transparent)', border: 0, height: 32, borderRadius: 9999, fontSize: 17, fontWeight: 500, letterSpacing: '-.025em', color: TEXT, flexShrink: 0 }}>PDF 편집</button>
-      <div className="pdfe-filename" style={{ minWidth: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <FileText size={22} strokeWidth={1.5} />
-        <input aria-label="파일명" title={workspace.fileName} disabled={p.isExporting} value={workspace.fileName} onChange={e => p.onFileNameChange(e.target.value)} style={{ width: 220, minWidth: 0, maxWidth: '100%', height: 32, border: `1px solid ${BORDER}`, borderRadius: 8, padding: '6px 12px', background: SURFACE, color: TEXT, fontSize: 14, fontWeight: 500, textOverflow: 'ellipsis' }} />
-      </div>
-      <button onClick={p.onRetrySave} disabled={p.saveStatus !== 'error'} style={{ border: 0, borderRadius: 9999, height: 32, background: 'var(--pdfe-button-bg, transparent)', color: p.saveStatus === 'error' ? DANGER : TEXT_SUBTLE, fontSize: 13 }}>{p.hasUnappliedEdit ? '적용되지 않은 편집' : saveLabels[p.saveStatus]}</button>
-      <button className="pdfe-primary-button" disabled={p.isExporting} onClick={p.goExport} style={solidAccentBtn({ height: 32, borderRadius: 9999, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 })}><Download size={22} strokeWidth={1.5} />내보내기</button>
-    </header>
+    <DocumentHeader fileName={workspace.fileName} busy={p.isExporting} format="pdf" onFileNameChange={p.onFileNameChange}
+      onHome={p.goToUpload} onExport={p.goExport} saveLabel={p.hasUnappliedEdit ? '적용되지 않은 편집' : saveLabels[p.saveStatus]}
+      saveError={p.saveError} onRetrySave={p.onRetrySave} />
     <div style={{ minHeight: TOOLBAR_H, flex: '0 0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '6px 20px', borderBottom: `1px solid ${BORDER}`, background: SURFACE }}>
       <button style={toolBase} aria-label="전체 페이지 보기" title="전체 페이지 보기" onClick={() => void guarded(p.onOpenGridView)}><LayoutGrid size={22} strokeWidth={1.5} /></button>
       <div className="pdfe-segmented" role="group" aria-label="편집 도구">
@@ -253,6 +291,7 @@ export function EditorScreen(p: EditorScreenProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         {p.activeTool === 'select' && sourceSelections.length > 0 && <div className="pdfe-selection-row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8 }}>
           <span role="status" aria-live="polite">{sourceSelections.length}개 선택</span>
+          {sourceSelections.length > 1 && selection?.kind === 'source' && selection.lineIds.length > 1 && <button type="button" aria-label="선택한 텍스트를 한 객체로 묶기" title={p.hasUnappliedEdit ? '현재 편집 내용을 먼저 적용해 주세요.' : '선택한 텍스트를 한 객체로 묶습니다.'} disabled={!editable || !selection.editable || p.hasUnappliedEdit} onClick={() => void mergeSelectedText()}>하나의 객체로 묶기</button>}
           {selection && engine.info?.canCopy && <button title="텍스트 복사" onClick={() => void copy()}>복사</button>}
         </div>}
         <button style={toolBase} disabled={!p.canUndo || p.isExporting} onClick={() => undo(false)} aria-label="실행 취소" title="실행 취소"><Undo2 size={22} strokeWidth={1.5} /></button><button style={toolBase} disabled={!p.canRedo || p.isExporting} onClick={() => undo(true)} aria-label="다시 실행" title="다시 실행"><Redo2 size={22} strokeWidth={1.5} /></button>

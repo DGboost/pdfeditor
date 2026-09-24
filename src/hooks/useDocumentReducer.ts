@@ -149,7 +149,9 @@ export function documentReducer(state: DocumentState, action: DocumentAction): D
   }
   if (action.type === 'SET_FILE_NAME') {
     if (workspace.fileName === action.name) return state;
-    return { ...state, workspace: { ...workspace, fileName: action.name }, revision: state.revision + 1 };
+    // The file name is not document content: bumping revision would discard a
+    // pending text edit and invalidate every page raster.
+    return { ...state, workspace: { ...workspace, fileName: action.name } };
   }
   if (action.type === 'UNDO' || action.type === 'REDO') {
     const { undo, redo } = state.history;

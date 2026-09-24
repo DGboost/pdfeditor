@@ -23,7 +23,7 @@ export function useDraftPersistence(options: DraftPersistenceOptions): DraftPers
     const isCurrent = () => {
       const now = latest.current;
       const nowState = now.getState?.() ?? now.state;
-      return nowState.workspace?.id === draft.workspace.id && nowState.revision === draft.revision && now.zoom === draft.zoom;
+      return nowState.workspace === draft.workspace && now.zoom === draft.zoom;
     };
     const pending = queue.current.catch(() => undefined).then(async () => {
       if (mounted.current && isCurrent()) { setStatus('saving'); setError(null); }

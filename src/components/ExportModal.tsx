@@ -1,32 +1,44 @@
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { BORDER, SURFACE, TEXT_MUTED, BORDER_SOFT, FONT_STACK, PANEL_SHADOW, solidAccentBtn, toolBase, fmtBase, fmtActive } from '../styles/theme';
-import type { ExportSettings, ExportFormat } from '../types/pdfEditor';
+import { BORDER, DANGER, SURFACE, TEXT_MUTED, BORDER_SOFT, FONT_STACK, PANEL_SHADOW, solidAccentBtn, toolBase, fmtBase, fmtActive } from '../styles/theme';
+
+export type ExportActionId = 'download' | 'archive' | 'original';
+export interface ExportAction { id: ExportActionId; label: string; run: () => Promise<void> }
 
 export interface ExportModalProps {
   open: boolean;
-  exportSettings: ExportSettings;
-  setExportSettings: React.Dispatch<React.SetStateAction<ExportSettings>>;
+  actions: ExportAction[];
+  selectedAction: ExportActionId;
+  onSelectedActionChange: (id: ExportActionId) => void;
   isExporting: boolean;
   onClose: () => void;
-  onDownload: () => void;
-  onSaveToArchive: () => void;
 }
 
 
-export function ExportModal({ open, exportSettings, setExportSettings, isExporting, onClose, onDownload, onSaveToArchive }: ExportModalProps) {
+export function ExportModal({ open, actions, selectedAction, onSelectedActionChange, isExporting, onClose }: ExportModalProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
+  useEffect(() => { setError(null); }, [open, selectedAction]);
   if (!open) return null;
 
-  const setFormat = (format: ExportFormat) => setExportSettings((s) => ({ ...s, format }));
-  const isPdf = exportSettings.format === 'pdf';
-
-  const onAction = () => { if (!isExporting) { if (isPdf) onDownload(); else onSaveToArchive(); } };
-  const actionBtnStyle: React.CSSProperties = { ...solidAccentBtn({ padding: 12, fontSize: 14 }), width: '100%', opacity: isExporting ? .5 : 1, cursor: isExporting ? 'not-allowed' : 'pointer' };
-  const actionLabel = isExporting ? (isPdf ? '내보내는 중…' : '저장 중…') : (isPdf ? 'PDF 다운로드' : '보관함에 저장');
+  const action = actions.find(item => item.id === selectedAction);
+  const locked = isExporting || running;
+  const onAction = async () => {
+    if (isExporting || runningRef.current || !action) return;
+    runningRef.current = true;
+    setRunning(true);
+    setError(null);
+    try { await action.run(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { runningRef.current = false; setRunning(false); }
+  };
+  const actionBtnStyle: React.CSSProperties = { ...solidAccentBtn({ padding: 12, fontSize: 14 }), width: '100%', opacity: locked ? .5 : 1, cursor: locked ? 'not-allowed' : 'pointer' };
 
   return (
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 55, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-      onClick={() => { if (!isExporting) onClose(); }}
+      onClick={() => { if (!locked) onClose(); }}
     >
       <div
         role="dialog" aria-modal="true" aria-label="내보내기" className="pdfe-panel-enter"
@@ -35,18 +47,18 @@ export function ExportModal({ open, exportSettings, setExportSettings, isExporti
       >
         <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h2 style={{ fontSize: 17, fontWeight: 500, margin: 0 }}>내보내기</h2>
-          <button disabled={isExporting} onClick={onClose} aria-label="닫기" style={toolBase}><X size={24} strokeWidth={1.5} /></button>
+          <button disabled={locked} onClick={onClose} aria-label="닫기" style={toolBase}><X size={24} strokeWidth={1.5} /></button>
         </div>
 
         <div className="pdfe-scroll" style={{ minHeight: 0, overflowY: 'auto', marginBottom: 20 }}>
-          <div style={{ fontSize: 14, color: TEXT_MUTED, marginBottom: 12 }}>내보내기 형식</div>
-          <div style={{ display: 'flex', gap: 4, padding: 4, background: 'var(--pdfe-selected, #f3f4f6)', border: `1px solid ${BORDER}`, borderRadius: 999 }}>
-            <button disabled={isExporting} aria-pressed={exportSettings.format === 'pdf'} onClick={() => setFormat('pdf')} style={exportSettings.format === 'pdf' ? fmtActive : fmtBase}>PDF</button>
-            <button disabled={isExporting} aria-pressed={exportSettings.format === 'archive'} onClick={() => setFormat('archive')} style={exportSettings.format === 'archive' ? fmtActive : fmtBase}>보관함 저장</button>
+          <div style={{ fontSize: 14, color: TEXT_MUTED, marginBottom: 12 }}>내보내기 작업</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: 4, background: 'var(--pdfe-selected, #f3f4f6)', border: `1px solid ${BORDER}`, borderRadius: 20 }}>
+            {actions.map(item => <button key={item.id} disabled={locked} aria-pressed={selectedAction === item.id} onClick={() => onSelectedActionChange(item.id)} style={selectedAction === item.id ? fmtActive : fmtBase}>{item.label}</button>)}
           </div>
         </div>
 
-        <button className="pdfe-primary-button" onClick={onAction} disabled={isExporting} style={{ ...actionBtnStyle, flexShrink: 0 }}>{actionLabel}</button>
+        {error && <p role="alert" style={{ color: DANGER, overflowWrap: 'anywhere' }}>{error}</p>}
+        <button className="pdfe-primary-button" onClick={() => void onAction()} disabled={locked || !action} style={{ ...actionBtnStyle, flexShrink: 0 }}>{locked ? '처리 중…' : action?.label ?? '작업을 선택하세요'}</button>
       </div>
     </div>
   );

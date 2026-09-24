@@ -42,6 +42,4 @@ export interface DocumentState {
   workspace: Workspace | null; revision: number;
   history: { undo: DocumentSnapshot[]; redo: DocumentSnapshot[] };
 }
-export type ExportFormat = 'pdf' | 'archive';
-export interface ExportSettings { format: ExportFormat }
 export interface EditController { flush: () => Promise<boolean>; cancel: () => void }

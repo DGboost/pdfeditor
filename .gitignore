@@ -3,3 +3,5 @@ dist
 server.log
 .server.pid
 .kilo
+/public/engines/
+/vendor/

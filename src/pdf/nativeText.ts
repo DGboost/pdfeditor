@@ -75,7 +75,28 @@ export class NativeTextStore {
         else for (const child of Object.values(item)) collect(child);
       }
       collect(json);
-      const unsafe: Point[] = []; const safe: Array<{origin:Point;bounds:Rect;clip?:Rect}> = [];
+      const safe: Array<{origin:Point;bounds:Rect;clip?:Rect}> = [];
+      // One painted-glyph lookup per character over every painted glyph is O(chars²).
+      // Bucket origins on a .02pt grid: a match within .02 is always in the 3x3 neighbourhood.
+      const safeCells = new Map<string, number[]>();
+      const findSafe = (origin: Point) => {
+        const cx = Math.floor(origin[0] / .02), cy = Math.floor(origin[1] / .02);
+        let at = Infinity;
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
+          for (const index of safeCells.get(`${cx + dx}:${cy + dy}`) ?? [])
+            if (index < at && Math.hypot(safe[index].origin[0] - origin[0], safe[index].origin[1] - origin[1]) < .02) at = index;
+        return at === Infinity ? undefined : safe[at];
+      };
+      const unsafeCells = new Map<string, Point[]>();
+      const nearUnsafe = (origin: Point) => {
+        // Ordinary opaque pages have no unsafe glyph at all; skip the 9-cell probe.
+        if (!unsafeCells.size) return false;
+        const cx = Math.floor(origin[0] / .02), cy = Math.floor(origin[1] / .02);
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
+          for (const point of unsafeCells.get(`${cx + dx}:${cy + dy}`) ?? [])
+            if (Math.hypot(point[0] - origin[0], point[1] - origin[1]) < .02) return true;
+        return false;
+      };
       const clips:Array<Rect|false>=[]; let maskDepth=0; const groups:boolean[]=[];
       const imageBounds:Rect[]=[];
       const rulingLines:Array<[Point,Point]>=[];
@@ -101,8 +122,15 @@ export class NativeTextStore {
             for(const area of clips)if(area)clip=clip?[Math.max(clip[0],area[0]),Math.max(clip[1],area[1]),Math.min(clip[2],area[2]),Math.min(clip[3],area[3])]:area;
             const empty=bounds[0]>=bounds[2]||bounds[1]>=bounds[3];
             if(allowed && !clips.includes(false) && (!clip||empty||inside(bounds,clip)) && maskDepth===0 && !groups.some(Boolean) && !wmode && !bidi && cp >= 0)
-              safe.push({origin:[m[4],m[5]],bounds,clip});
-            else unsafe.push([m[4],m[5]]);
+            {
+              const at = safe.push({origin:[m[4],m[5]],bounds,clip}) - 1;
+              const key = `${Math.floor(m[4] / .02)}:${Math.floor(m[5] / .02)}`;
+              const bucket = safeCells.get(key); if (bucket) bucket.push(at); else safeCells.set(key, [at]);
+            }
+            else {
+              const key = `${Math.floor(m[4] / .02)}:${Math.floor(m[5] / .02)}`;
+              const bucket = unsafeCells.get(key); if (bucket) bucket.push([m[4],m[5]]); else unsafeCells.set(key, [[m[4],m[5]]]);
+            }
           } finally { font.destroy(); }
         }}); } finally { text.destroy(); }
       };
@@ -168,7 +196,7 @@ export class NativeTextStore {
             if (glyphs) this.sourceGlyphs.set(`${index}/${fontKey}`, glyphs);
           } else font.destroy();
           const color: RGB = nativeColor.length === 3 ? [nativeColor[0],nativeColor[1],nativeColor[2]] : [nativeColor[0],nativeColor[0],nativeColor[0]];
-          const geometry=safe.find(item=>Math.hypot(item.origin[0]-origin[0],item.origin[1]-origin[1])<.02);
+          const geometry=findSafe(origin);
           const char:SourceCharacter = {text,origin,fontKey,sizePt,quad,color,paintBounds:geometry?.bounds,clipBounds:geometry?.clip}; line.chars.push(char); line.text += text;
           const style: TextStyle = {font:{kind:'source',sourcePageIndex:index,fontKey},sizePt,color};
           const previous = line.content.runs[line.content.runs.length-1];
@@ -189,15 +217,25 @@ export class NativeTextStore {
       const sameBaseline=(target:SourceTextLine,geometry:{origin:Point;direction:Point})=>
         Math.hypot(target.direction[0]-geometry.direction[0],target.direction[1]-geometry.direction[1])<.001 &&
         Math.abs((geometry.origin[0]-target.origin[0])*target.direction[1]-(geometry.origin[1]-target.origin[1])*target.direction[0])<.02;
+      // Metric line bounds can exclude painted glyphs; prune only by their actual union.
+      const paintGeometry = lines.map(line => {
+        const boxes = line.chars.map(char => char.paintBounds ?? quadBounds(char.quad));
+        const bounds:Rect = [Infinity,Infinity,-Infinity,-Infinity];
+        for(const box of boxes) {
+          bounds[0]=Math.min(bounds[0],box[0]);bounds[1]=Math.min(bounds[1],box[1]);
+          bounds[2]=Math.max(bounds[2],box[2]);bounds[3]=Math.max(bounds[3],box[3]);
+        }
+        return {boxes,bounds};
+      });
       for (const [i, target] of lines.entries()) {
         let reason: string | undefined;
         const mappedSemantic=semanticLines.filter((_text,j)=>semanticGeometry[j]&&sameBaseline(target,semanticGeometry[j])&&target.chars.some(c=>Math.hypot(c.origin[0]-semanticGeometry[j].origin[0],c.origin[1]-semanticGeometry[j].origin[1])<.02)).join('');
         if (nativeLines[i] !== target.text || mappedSemantic !== target.text) reason = '원본 문자와 Unicode 매핑이 달라 안전하게 교체할 수 없습니다.';
         else if (target.writingMode || Math.abs(Math.hypot(...target.direction)-1) > .001) reason = '세로쓰기 또는 유효하지 않은 본문 방향은 교체할 수 없습니다.';
         else if (/[\u0590-\u08ff\u0900-\u0dff\u200d\u0300-\u036f]/u.test(target.text)) reason = '복잡한 문자 조합은 안전하게 교체할 수 없습니다.';
-        else if (target.chars.some(c => unsafe.some(p => Math.hypot(p[0]-c.origin[0],p[1]-c.origin[1]) < .02) || !c.paintBounds)) reason = '불투명한 일반 본문이 아닌 글자는 교체할 수 없습니다.';
+        else if (target.chars.some(c => nearUnsafe(c.origin) || !c.paintBounds)) reason = '불투명한 일반 본문이 아닌 글자는 교체할 수 없습니다.';
         else if (target.chars.some((c,j) => target.chars.some((other,k) => k !== j && Math.hypot(c.origin[0]-other.origin[0],c.origin[1]-other.origin[1]) < .01))) reason = '겹친 글자 또는 부분 합자는 교체할 수 없습니다.';
-        else if (lines.some(other=>other!==target&&target.chars.some(char=>other.chars.some(neighbor=>intersects(char.paintBounds!,neighbor.paintBounds??quadBounds(neighbor.quad)))))) reason = '다른 본문 줄의 글자와 겹쳐 안전하게 교체할 수 없습니다.';
+        else if (paintGeometry.some((other,j)=>j!==i&&intersects(paintGeometry[i].bounds,other.bounds)&&paintGeometry[i].boxes.some(box=>other.boxes.some(neighbor=>intersects(box,neighbor))))) reason = '다른 본문 줄의 글자와 겹쳐 안전하게 교체할 수 없습니다.';
         if(!reason)for(const char of target.chars) {
           // Derive exclusive selectors from protected metric geometry. MuPDF removes
           // whole native glyphs; selectors must not touch a protected glyph box.

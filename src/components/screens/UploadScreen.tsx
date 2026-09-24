@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import type { DragEvent, ChangeEvent } from 'react';
 import { Upload, ShieldCheck } from 'lucide-react';
-import type { ArchiveSummary, RetainedDraftSummary } from '../../utils/db';
+import type { LibraryItem, LibraryKey } from '../../documents/officeTypes';
 import { ACCENT, BG, SURFACE, SURFACE_SOFT, BORDER, BORDER_SOFT, BORDER_STRONG, TEXT, TEXT_MUTED, TEXT_SUBTLE, DANGER, FONT_STACK, PANEL_SHADOW, outlineAccentBtn } from '../../styles/theme';
 
 export interface UploadScreenProps {
@@ -12,17 +12,19 @@ export interface UploadScreenProps {
   uploadError: string | null;
   onDragOverChange: (v: boolean) => void;
   onFile: (file: File) => void;
-  archives: ArchiveSummary[];
-  retainedDrafts: RetainedDraftSummary[];
-  onOpenArchive: (id: string) => void;
-  onDeleteArchive: (id: string) => void;
-  onDownloadRetained: (id: number) => void;
-  onDeleteRetained: (id: number) => void;
+  drafts: LibraryItem[];
+  archives: LibraryItem[];
+  retainedDrafts: LibraryItem[];
+  onOpen: (key: LibraryKey) => void;
+  onDelete: (key: LibraryKey) => void;
+  onDownloadRetained: (key: LibraryKey) => void;
+  onOpenRetainedOriginal: (key: LibraryKey) => void;
+  onDownloadOriginal: (key: LibraryKey) => void;
 }
 
 const libraryButtonStyle = outlineAccentBtn({ border: `1px solid ${BORDER}`, color: TEXT, padding: '6px 12px', fontSize: 14, fontWeight: 400 });
 
-export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, uploadError, onDragOverChange, onFile, archives, retainedDrafts, onOpenArchive, onDeleteArchive, onDownloadRetained, onDeleteRetained }: UploadScreenProps) {
+export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, uploadError, onDragOverChange, onFile, drafts, archives, retainedDrafts, onOpen, onDelete, onDownloadRetained, onOpenRetainedOriginal, onDownloadOriginal }: UploadScreenProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const onDragOver = (e: DragEvent) => { e.preventDefault(); onDragOverChange(true); };
@@ -61,13 +63,16 @@ export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, up
           }}
         >
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: ACCENT }}></span>
-          PDF WORKSPACE · DOCUMENT EDITOR
+          DOCUMENT WORKSPACE · DOCUMENT EDITOR
         </div>
         <h1 style={{ fontSize: 21, lineHeight: 1.4, fontWeight: 700, margin: '0 0 12px' }}>
-          PDF를 열어서<br />바로 수정하세요
+          문서를 열어서<br />바로 수정하세요
         </h1>
         <p style={{ fontSize: 14, color: TEXT_MUTED, margin: '0 0 20px', maxWidth: 520, lineHeight: 1.6 }}>
-          PDF를 브라우저에서 열고 편집합니다. 스캔 문서는 텍스트 인식 없이 원본으로 표시됩니다.
+          PDF, DOCX, HWP, HWPX, PPTX 문서를 브라우저에서 열고 편집합니다. 스캔 PDF는 텍스트 인식 없이 원본으로 표시됩니다.
+        </p>
+        <p style={{ fontSize: 13, color: TEXT_SUBTLE, margin: '0 0 20px', maxWidth: 520, lineHeight: 1.6 }}>
+          DOC/PPT는 직접 편집하지 않습니다. DOCX/PPTX로 변환한 파일을 열어 주세요.
         </p>
 
         <div
@@ -88,7 +93,7 @@ export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, up
           }}
           role="button"
           tabIndex={uploading ? -1 : 0}
-          aria-label="PDF 파일 첨부하기"
+          aria-label="문서 파일 첨부하기"
           aria-disabled={uploading}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onDropzoneClick(); } }}
           onDragOver={onDragOver}
@@ -124,7 +129,7 @@ export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, up
                 <Upload size={22} strokeWidth={1.5} />
               </div>
               <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>
-                {dragOver ? '여기에 놓으세요' : 'PDF 파일 첨부하기'}
+                {dragOver ? '여기에 놓으세요' : '문서 파일 첨부하기'}
               </div>
               <div style={{ fontSize: 13, color: TEXT_SUBTLE, lineHeight: 1.5 }}>
                 클릭해서 업로드 또는 파일을 여기로 드래그
@@ -132,7 +137,7 @@ export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, up
             </div>
           )}
         </div>
-        <input ref={fileInputRef} type="file" accept="application/pdf" disabled={uploading} style={{ display: 'none' }} onChange={onFileInputChange} />
+        <input ref={fileInputRef} type="file" accept=".pdf,.docx,.hwp,.hwpx,.pptx,.doc,.ppt" disabled={uploading} style={{ display: 'none' }} onChange={onFileInputChange} />
 
         {uploadError && (
           <div role="alert" style={{ marginTop: 14, fontSize: 13, color: DANGER }}>{uploadError}</div>
@@ -143,35 +148,32 @@ export function UploadScreen({ fileName, dragOver, uploading, uploadSlowHint, up
           문서는 이 브라우저에서 처리되며, 임시 저장과 보관함은 이 기기에 저장됩니다.
         </div>
 
-        <section aria-label="보관함" style={{ marginTop: 20 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 500 }}>보관함</h2>
-          {archives.length === 0 && <p style={{ color: TEXT_MUTED }}>보관함에 저장된 문서가 없습니다</p>}
-          {archives.map(archive => (
-            <div key={archive.id} style={{ border: `1px solid ${BORDER}`, borderRadius: 10, padding: 14, marginBottom: 10 }}>
-              <div style={{ color: TEXT, fontWeight: 600, overflowWrap: 'anywhere' }}>{archive.fileName}</div>
-              <div style={{ color: TEXT_SUBTLE, fontSize: 13, margin: '6px 0 10px' }}>{new Date(archive.savedAt).toLocaleString()} · {archive.pageCount}페이지</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button style={libraryButtonStyle} disabled={uploading} onClick={() => onOpenArchive(archive.id)}>열기</button>
-                <button style={libraryButtonStyle} disabled={uploading} onClick={() => onDeleteArchive(archive.id)}>삭제</button>
-              </div>
+        {[
+          { title: '복구 가능한 작업', items: drafts, empty: '복구할 작업이 없습니다.' },
+          { title: '보관한 문서', items: archives, empty: '보관한 문서가 없습니다.' },
+          { title: '이전 작업 백업', items: retainedDrafts, empty: '이전 작업 백업이 없습니다.' },
+        ].map(group => <section key={group.title} aria-label={group.title} style={{ marginTop: 20 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 500 }}>{group.title}</h2>
+          {group.items.length === 0 && <p style={{ color: TEXT_MUTED }}>{group.empty}</p>}
+          {group.items.map(item => <div key={`${item.key.namespace}:${item.key.kind}:${item.key.id}`} style={{ border: `1px solid ${BORDER}`, borderRadius: 10, padding: 14, marginBottom: 10 }}>
+            <div style={{ color: TEXT, fontWeight: 600, overflowWrap: 'anywhere' }}>
+              {item.format && <span style={{ fontSize: 11, marginRight: 8 }}>{item.format.toUpperCase()}</span>}
+              {item.fileName}
             </div>
-          ))}
-        </section>
-        <section aria-label="이전 작업 백업" style={{ marginTop: 20 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 500 }}>이전 작업 백업</h2>
-          {retainedDrafts.length === 0 && <p style={{ color: TEXT_MUTED }}>이전 작업 백업이 없습니다</p>}
-          {retainedDrafts.map(backup => (
-            <div key={backup.id} style={{ border: `1px solid ${BORDER}`, borderRadius: 10, padding: 14, marginBottom: 10 }}>
-              <div style={{ color: TEXT, fontWeight: 600 }}>백업 #{backup.id} · {backup.kind === 'legacy' ? '구버전 작업' : '복구하지 못한 작업'}</div>
-              <p style={{ color: TEXT_MUTED, fontSize: 13 }}>{backup.reason}</p>
-              <div style={{ color: TEXT_SUBTLE, fontSize: 13, marginBottom: 10 }}>{new Date(backup.savedAt).toLocaleString()}</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button style={libraryButtonStyle} disabled={uploading} onClick={() => onDownloadRetained(backup.id)}>백업 다운로드</button>
-                <button style={libraryButtonStyle} disabled={uploading} onClick={() => onDeleteRetained(backup.id)}>삭제</button>
-              </div>
+            {item.reason && <p style={{ color: TEXT_MUTED, fontSize: 13 }}>{item.reason}</p>}
+            <div style={{ color: TEXT_SUBTLE, fontSize: 13, margin: '6px 0 10px' }}>
+              {new Date(item.savedAt).toLocaleString()}{item.pageCount !== undefined && ` · ${item.pageCount}페이지`}
             </div>
-          ))}
-        </section>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {item.key.kind === 'retained' ? <>
+                <button style={libraryButtonStyle} disabled={uploading} onClick={() => onDownloadRetained(item.key)}>백업 다운로드</button>
+                <button style={libraryButtonStyle} disabled={uploading} onClick={() => onOpenRetainedOriginal(item.key)}>보존 원본 열기</button>
+              </> : <button style={libraryButtonStyle} disabled={uploading} onClick={() => onOpen(item.key)}>{item.key.kind === 'draft' ? '작업 복구' : '열기'}</button>}
+              {item.key.namespace === 'office' && item.key.kind !== 'retained' && <button style={libraryButtonStyle} disabled={uploading} onClick={() => onDownloadOriginal(item.key)}>보존 원본 다운로드</button>}
+              {item.key.kind !== 'draft' && <button style={libraryButtonStyle} disabled={uploading} onClick={() => onDelete(item.key)}>삭제</button>}
+            </div>
+          </div>)}
+        </section>)}
       </div>
     </div>
   );
