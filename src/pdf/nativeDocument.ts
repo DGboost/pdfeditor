@@ -39,7 +39,7 @@ function toUnicode(mapping: Map<number,string>): string {
   const groups:string[]=[]; for(let i=0;i<entries.length;i+=100) { const group=entries.slice(i,i+100); groups.push(`${group.length} beginbfchar\n${group.join('\n')}\nendbfchar`); }
   return `/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /EditorUnicode def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n${groups.join('\n')}\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend`;
 }
-function writeLayouts(pdf:mupdf.PDFDocument, resources:mupdf.PDFObject, layouts:NativeLayout[], inverse:Matrix):string {
+function writeLayouts(pdf:mupdf.PDFDocument, resources:mupdf.PDFObject, layouts:NativeLayout[], inverse:Matrix, store:NativeTextStore):string {
   const fontGroups=new Map<mupdf.Font,{name:string;mapping:Map<number,string>;ref:mupdf.PDFObject}>(); const commands:string[]=[];
   try {
     for(const layout of layouts) for(const glyph of layout.glyphs) {
@@ -47,7 +47,7 @@ function writeLayouts(pdf:mupdf.PDFDocument, resources:mupdf.PDFObject, layouts:
       if(!entry) {
         let ref:mupdf.PDFObject;
         try { const embedded=pdf.addFont(glyph.font); try { const local=cloneDictionary(pdf,embedded); try { ref=pdf.addObject(local); } finally {local.destroy();} } finally {embedded.destroy();} }
-        catch(error) { if(glyph.style.font.kind==='source') throw new NativeEditError('FONT_SUBSTITUTION_REQUIRED','원본 글꼴을 안전하게 포함할 수 없어 대체 글꼴이 필요합니다',{kind:'bundled',family:'NanumGothic',bold:glyph.font.isBold()}); throw error; }
+        catch(error) { if(glyph.style.font.kind==='source') throw store.missingSourceFont(glyph.style.font,'원본 글꼴을 결과 PDF에 안전하게 포함할 수 없습니다.',glyph.font.isBold()); throw error; }
         entry={name:uniqueResource(resources,'Font','PdfEditorFont'),mapping:new Map(),ref}; fontGroups.set(glyph.font,entry); putResource(resources,'Font',entry.name,ref);
       }
       entry.mapping.set(glyph.gid,glyph.text);
@@ -61,7 +61,7 @@ function writeLayouts(pdf:mupdf.PDFDocument, resources:mupdf.PDFObject, layouts:
   } finally {for(const entry of fontGroups.values()) entry.ref.destroy();}
 }
 
-function verifyLayoutEmbedding(layout:NativeLayout,bounds:Rect):void {
+function verifyLayoutEmbedding(layout:NativeLayout,bounds:Rect,store:NativeTextStore):void {
   if(!layout.glyphs.length)return;
   const scratch=new mupdf.PDFDocument();let reopened:mupdf.PDFDocument|undefined;
   try {
@@ -69,7 +69,7 @@ function verifyLayoutEmbedding(layout:NativeLayout,bounds:Rect):void {
     try {
       const page=scratch.loadPage(0);const inverse=mupdf.Matrix.invert(page.getTransform());page.destroy();
       const resources=ownResources(scratch,ref);
-      try{appendContents(scratch,ref,writeLayouts(scratch,resources,[layout],inverse));}finally{resources.destroy();}
+      try{appendContents(scratch,ref,writeLayouts(scratch,resources,[layout],inverse,store));}finally{resources.destroy();}
     }finally{ref.destroy();}
     const buffer=scratch.saveToBuffer('garbage=compact,compress=yes');
     try{reopened=new mupdf.PDFDocument(buffer.asUint8Array().slice());}finally{buffer.destroy();}
@@ -100,8 +100,9 @@ function verifyLayoutEmbedding(layout:NativeLayout,bounds:Rect):void {
       }finally{semantic.destroy();}
     }finally{device.destroy();list.destroy();}
   }catch(error){
+    if(error instanceof NativeEditError)throw error;
     const sourceGlyph=layout.glyphs.find(glyph=>glyph.style.font.kind==='source');
-    if(sourceGlyph)throw new NativeEditError('FONT_SUBSTITUTION_REQUIRED','원본 글꼴의 문자 출력이 일치하지 않아 대체 글꼴이 필요합니다',{kind:'bundled',family:'NanumGothic',bold:sourceGlyph.font.isBold()});
+    if(sourceGlyph?.style.font.kind==='source')throw store.missingSourceFont(sourceGlyph.style.font,'저장 후 다시 읽은 문자가 원본 글꼴 출력과 일치하지 않습니다.',sourceGlyph.font.isBold());
     throw new NativeEditError('FONT_ROUNDTRIP_FAILED',error instanceof Error?error.message:String(error));
   }finally{reopened?.destroy();scratch.destroy();}
 }
@@ -181,9 +182,9 @@ export function createNativePdfApi(loadFont:(font:Extract<FontChoice,{kind:'bund
             if(JSON.stringify(remaining)!==JSON.stringify(expected))throw new NativeEditError('UNSAFE_REDACTION','선택하지 않은 글자가 영향을 받아 안전하게 수정할 수 없습니다.');
           }finally{audit.close();}
         }
-        appendContents(pdf,object,writeLayouts(pdf,resources,layouts,inverse));
+        appendContents(pdf,object,writeLayouts(pdf,resources,layouts,inverse,textStore));
       }finally{resources.destroy();}
-      for(const layout of layouts)verifyLayoutEmbedding(layout,bounds);
+      for(const layout of layouts)verifyLayoutEmbedding(layout,bounds,textStore);
       return targets;
     } finally {object.destroy();page.destroy();}
   }
@@ -221,6 +222,10 @@ export function createNativePdfApi(loadFont:(font:Extract<FontChoice,{kind:'bund
     async downloadFont(choice) {
       textStore.extract(requireOpen().pdf, choice.sourcePageIndex);
       return textStore.downloadFont(choice);
+    },
+    async importFont(choice, file, fileName) {
+      textStore.extract(requireOpen().pdf, choice.sourcePageIndex);
+      return textStore.importFont(choice, file, fileName);
     },
     async registerFonts(assets) { requireOpen(); await textStore.registerFonts(assets); },
     async copySourceText(index,start,end){const {pdf,info}=requireOpen();if(!info.canCopy)throw new NativeEditError('COPY_PERMISSION','이 PDF에는 텍스트 복사 권한이 없습니다.');const page=pdf.loadPage(index);const list=contentsList(page);page.destroy();const text=list.toStructuredText('');try{return text.copy(start,end);}finally{text.destroy();list.destroy();}},

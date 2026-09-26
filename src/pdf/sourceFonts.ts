@@ -9,7 +9,7 @@ const standard14: Record<string, true> = {
   Symbol: true, ZapfDingbats: true,
 };
 const normalizedName = (name: string) => name.replace(/^[A-Z]{6}\+/, '');
-type Declaration = { names: string[]; embedded: boolean; programId?: number; type3: boolean; type3Id?: number; builtin: boolean; weight?: number; italic?: boolean; conflict: boolean; identityConflict?: boolean };
+type Declaration = { names: string[]; legacyName?: string; embedded: boolean; programId?: number; type3: boolean; type3Id?: number; builtin: boolean; weight?: number; italic?: boolean; conflict: boolean; identityConflict?: boolean };
 
 function nameValue(object: mupdf.PDFObject, key: string): string | undefined {
   const value = object.get(key);
@@ -27,6 +27,16 @@ function numberValue(object: mupdf.PDFObject, key: string): number | undefined {
     return value.asNumber();
   } finally { value.destroy(); }
 }
+/** MuPDF decodes PDF names as UTF-8; Korean producers such as Hangul write EUC-KR/CP949 bytes instead. */
+function legacyNameValue(object: mupdf.PDFObject, key: string): string | undefined {
+  const value = object.get(key);
+  try {
+    if (!value.isName() || !value.asName().includes('\ufffd')) return undefined;
+    const escaped = value.toString(true).slice(1).replace(/#([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    return new TextDecoder('euc-kr', { fatal: true }).decode(Uint8Array.from(escaped, char => char.charCodeAt(0)));
+  } catch { return undefined; }
+  finally { value.destroy(); }
+}
 
 function inspectFont(font: mupdf.PDFObject): Declaration {
   if (!font.isDictionary()) throw new Error('Invalid font dictionary');
@@ -39,6 +49,7 @@ function inspectFont(font: mupdf.PDFObject): Declaration {
     try { result.type3Id = resolved.pointer; } finally { resolved.destroy(); }
   }
   addName(nameValue(font, 'BaseFont'));
+  if (!result.type3) result.legacyName = legacyNameValue(font, 'BaseFont');
   const inspectDescriptor = (owner: mupdf.PDFObject) => {
     addName(nameValue(owner, 'BaseFont'));
     const descriptor = owner.get('FontDescriptor');
@@ -134,7 +145,8 @@ export function collectSourceFonts(pdf: mupdf.PDFDocument, index: number): (font
             for (const name of new Set(declaration.names.map(normalizedName))) {
               const previous = declarations.get(name);
               if (previous) {
-                const conflict = previous.conflict || declaration.conflict || previous.embedded !== declaration.embedded || previous.programId !== declaration.programId || previous.type3 !== declaration.type3 || previous.type3Id !== declaration.type3Id || previous.builtin !== declaration.builtin || previous.weight !== declaration.weight || previous.italic !== declaration.italic;
+                // Distinct EUC-KR names can collapse to the same lossy UTF-8 key; never merge them into one identity.
+                const conflict = previous.conflict || declaration.conflict || previous.legacyName !== declaration.legacyName || previous.embedded !== declaration.embedded || previous.programId !== declaration.programId || previous.type3 !== declaration.type3 || previous.type3Id !== declaration.type3Id || previous.builtin !== declaration.builtin || previous.weight !== declaration.weight || previous.italic !== declaration.italic;
                 previous.conflict = declaration.conflict = conflict;
                 previous.identityConflict = declaration.identityConflict = previous.identityConflict || declaration.identityConflict;
               } else declarations.set(name, declaration);
@@ -166,7 +178,7 @@ export function collectSourceFonts(pdf: mupdf.PDFDocument, index: number): (font
 
   return (fontKey, nativeName) => {
     const declaration = declarations.get(normalizedName(nativeName));
-    const unknown = (unavailableReason: string): SourceFontInfo => ({ sourcePageIndex: index, fontKey, declaredName: declaration?.names[0] ?? nativeName, embedded: 'unknown', usable: false, unavailableReason });
+    const unknown = (unavailableReason: string): SourceFontInfo => ({ sourcePageIndex: index, fontKey, declaredName: declaration?.legacyName ?? declaration?.names[0] ?? nativeName, embedded: 'unknown', usable: false, unavailableReason });
     if (incomplete) return unknown('PDF 글꼴 리소스를 완전히 확인할 수 없어 원본 글꼴을 안전하게 식별할 수 없습니다.');
     if (!declaration) return unknown('표시된 글꼴과 PDF에 선언된 글꼴이 일치하지 않아 원본 글꼴을 확인할 수 없습니다.');
     if (declaration.conflict) return unknown('PDF의 글꼴 이름, 포함 여부 또는 스타일 선언이 서로 충돌합니다. 대체 글꼴을 선택해 주세요.');
@@ -176,14 +188,14 @@ export function collectSourceFonts(pdf: mupdf.PDFDocument, index: number): (font
     const catalog = styleConflict ? undefined : face;
     const usable = declaration.embedded || declaration.type3 || declaration.builtin;
     return {
-      sourcePageIndex: index, fontKey, declaredName: declaration.names[0], embedded: declaration.embedded, usable,
+      sourcePageIndex: index, fontKey, declaredName: declaration.legacyName ?? declaration.names[0], embedded: declaration.embedded, usable,
       ...(declaration.weight !== undefined ? { weight: declaration.weight } : {}),
       ...(declaration.italic !== undefined ? { italic: declaration.italic } : {}),
       ...(catalog ? { catalogId: catalog.id, family: catalog.family, weight: catalog.weight, italic: catalog.italic } : {}),
       ...(!usable ? { unavailableReason: styleConflict
-        ? 'PDF의 글꼴 스타일 선언이 지원 글꼴과 일치하지 않습니다. 대체 글꼴을 선택해 주세요.'
-        : catalog ? '원본 글꼴이 PDF에 포함되어 있지 않습니다. 정확한 글꼴을 다운로드하거나 대체 글꼴을 선택해 주세요.'
-          : '원본 글꼴이 PDF에 포함되어 있지 않으며 정확히 일치하는 지원 글꼴이 없습니다. 대체 글꼴을 선택해 주세요.' } : {}),
+        ? 'PDF의 글꼴 스타일 선언이 지원 글꼴과 일치하지 않습니다.'
+        : catalog ? '원본 글꼴이 PDF에 포함되어 있지 않습니다. 같은 이름·스타일의 공개 글꼴을 ‘다운로드해서 적용’으로 내려받아 사용해 주세요. 원본과 제작 버전·글자 폭이 다를 수 있습니다.'
+          : '원본 글꼴이 PDF에 포함되어 있지 않으며 편집기에서 받을 수 있는 같은 글꼴이 없습니다.' } : {}),
     };
   };
 }

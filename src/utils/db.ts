@@ -25,10 +25,16 @@ export function validateFontAssets(value: unknown): Set<string> {
   const ids = new Set<string>();
   for (const asset of value) {
     record(asset);
-    requireValue(string(asset.id) && /^[a-f0-9]{64}$/.test(asset.id) && !ids.has(asset.id) && string(asset.catalogId));
-    const face = getCatalogFace(asset.catalogId);
-    requireValue(!!face && asset.id === face.sha256 && asset.family === face.family && asset.postScriptName === face.postScriptName &&
-      asset.weight === face.weight && asset.italic === face.italic && asset.sourceUrl === face.url && asset.licenseText === face.licenseText);
+    if (asset.origin === 'local') {
+      requireValue(index(asset.subfont) && string(asset.id) && asset.id.endsWith(`:${asset.subfont}`) && /^[a-f0-9]{64}:\d+$/.test(asset.id) && !ids.has(asset.id) &&
+        string(asset.fileName) && string(asset.family) && string(asset.postScriptName) && Number.isInteger(asset.weight) &&
+        Number(asset.weight) >= 1 && Number(asset.weight) <= 1000 && typeof asset.italic === 'boolean');
+    } else {
+      requireValue(string(asset.id) && /^[a-f0-9]{64}$/.test(asset.id) && !ids.has(asset.id) && string(asset.catalogId));
+      const face = getCatalogFace(asset.catalogId);
+      requireValue(!!face && asset.id === face.sha256 && asset.family === face.family && asset.postScriptName === face.postScriptName &&
+        asset.weight === face.weight && asset.italic === face.italic && asset.sourceUrl === face.url && asset.licenseText === face.licenseText);
+    }
     requireValue(asset.bytes instanceof Blob && asset.bytes.size > 0);
     ids.add(asset.id);
   }

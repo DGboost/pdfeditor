@@ -63,6 +63,7 @@ async function execute(request: NativeRequest) {
     case 'open': send({ ...base, method: 'open', result: await api.open(...request.params) }); break;
     case 'text': send({ ...base, method: 'text', result: await api.text(...request.params) }); break;
     case 'downloadFont': send({ ...base, method: 'downloadFont', result: await api.downloadFont(...request.params) }); break;
+    case 'importFont': send({ ...base, method: 'importFont', result: await api.importFont(...request.params) }); break;
     case 'registerFonts': send({ ...base, method: 'registerFonts', result: await api.registerFonts(...request.params) }); break;
     case 'copySourceText': send({ ...base, method: 'copySourceText', result: await api.copySourceText(...request.params) }); break;
     case 'validate': send({ ...base, method: 'validate', result: await api.validate(...request.params) }); break;

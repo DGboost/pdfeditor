@@ -3,6 +3,7 @@ import type { DownloadedFontAsset, FontChoice, Point, Quad, Rect, RGB, SourceTex
 import type { SourceCharacter, SourceFontInfo, SourceTextLine, SourceTextPage } from './engineTypes';
 import { collectSourceFonts } from './sourceFonts';
 import { downloadCatalogFont, getCatalogFace, matchesCatalogAsset, verifyFontAsset } from './fontCatalog';
+import { createLocalFontAsset, embeddingAllowed, matchesSourceFont, readSfntFaces, verifyLocalFontAsset } from './localFont';
 
 export class NativeEditError extends Error {
   constructor(public code: string, message: string, public proposedFont?: FontChoice) { super(message); }
@@ -287,12 +288,13 @@ export class NativeTextStore {
   }
   async registerFonts(assets: DownloadedFontAsset[]): Promise<void> {
     for (const asset of assets) {
-      if (!matchesCatalogAsset(asset)) throw new NativeEditError('INVALID_FONT_ASSET','지원 목록과 일치하지 않는 글꼴 데이터입니다.');
+      const local = 'origin' in asset;
+      if (!local && !matchesCatalogAsset(asset)) throw new NativeEditError('INVALID_FONT_ASSET','지원 목록과 일치하지 않는 글꼴 데이터입니다.');
       const existing = this.downloaded.get(asset.id);
       if (existing?.asset.bytes === asset.bytes) continue;
-      const bytes = await verifyFontAsset(asset);
+      const bytes = local ? await verifyLocalFontAsset(asset) : await verifyFontAsset(asset);
       if (!existing) {
-        const font = new mupdf.Font(asset.postScriptName, bytes);
+        const font = new mupdf.Font(asset.postScriptName, bytes, local ? asset.subfont : 0);
         this.downloaded.set(asset.id, {font, asset});
       }
     }
@@ -307,14 +309,36 @@ export class NativeTextStore {
     await this.registerFonts([asset]);
     return asset;
   }
+  async importFont(choice: Extract<FontChoice, {kind:'source'}>, file: Blob, fileName: string): Promise<DownloadedFontAsset> {
+    const metadata = this.sourceFonts.get(`${choice.sourcePageIndex}/${choice.fontKey}`);
+    if (!metadata || metadata.catalogId || metadata.embedded === 'unknown') throw new NativeEditError('FONT_IMPORT_UNAVAILABLE', metadata?.catalogId
+      ? '이 원본 글꼴은 ‘다운로드해서 적용’으로 받을 수 있습니다.' : metadata?.unavailableReason ?? '원본 글꼴을 확인할 수 없어 글꼴 파일을 대조할 수 없습니다.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let faces;
+    try { faces = readSfntFaces(bytes); } catch (error) { throw new NativeEditError('INVALID_FONT_FILE', `‘${fileName}’: ${error instanceof Error ? error.message : String(error)}`); }
+    const declared = metadata.declaredName.replace(/^[A-Z]{6}\+/, '');
+    const face = faces.find(item => matchesSourceFont(metadata, item));
+    if (!face) throw new NativeEditError('FONT_FILE_MISMATCH', `‘${fileName}’의 글꼴(${faces.map(item => item.postScriptName).join(', ')})은 원본 글꼴 ‘${declared}’과 이름·스타일이 일치하지 않습니다.`);
+    if (!embeddingAllowed(face.fsType)) throw new NativeEditError('FONT_EMBEDDING_RESTRICTED', `‘${face.postScriptName}’ 글꼴은 제작사가 문서에 포함하는 것을 허용하지 않아 PDF에 사용할 수 없습니다.`);
+    const asset = await createLocalFontAsset(bytes, fileName, face);
+    await this.registerFonts([asset]);
+    return asset;
+  }
+  missingSourceFont(choice: Extract<FontChoice, {kind:'source'}>, reason: string, bold: boolean): NativeEditError {
+    const metadata = this.sourceFonts.get(`${choice.sourcePageIndex}/${choice.fontKey}`);
+    const name = `원본 글꼴 ‘${metadata?.declaredName.replace(/^[A-Z]{6}\+/, '') || '이름을 확인할 수 없는 글꼴'}’: ${reason}`;
+    if (metadata?.catalogId) return new NativeEditError('FONT_SUBSTITUTION_REQUIRED',
+      `${name} 같은 이름·스타일의 공개 글꼴(${metadata.family} · 굵기 ${metadata.weight}${metadata.italic ? ' · Italic' : ''})을 아래 ‘다운로드해서 적용’으로 내려받아 사용해 주세요. 원본과 제작 버전·글자 폭이 다를 수 있습니다.`);
+    if (metadata && metadata.embedded !== 'unknown') return new NativeEditError('FONT_SUBSTITUTION_REQUIRED',
+      `${name} 제작사나 공식 배포처에서 이 글꼴 파일(TTF/OTF/TTC)을 직접 받은 뒤 아래 ‘글꼴 파일 불러오기’로 선택하거나, 대체 글꼴을 사용해 주세요.`, {kind:'bundled',family:'NanumGothic',bold});
+    return new NativeEditError('FONT_SUBSTITUTION_REQUIRED', name, {kind:'bundled',family:'NanumGothic',bold});
+  }
   async font(choice: FontChoice): Promise<mupdf.Font> {
     if (choice.kind === 'source') {
       const font = this.fonts.get(`${choice.sourcePageIndex}/${choice.fontKey}`);
       if (!font) throw new NativeEditError('FONT_UNAVAILABLE','원본 글꼴을 찾을 수 없습니다.');
       const metadata = this.sourceFonts.get(`${choice.sourcePageIndex}/${choice.fontKey}`);
-      if (!metadata?.usable) throw new NativeEditError('FONT_SUBSTITUTION_REQUIRED', metadata?.catalogId
-        ? '원본 글꼴이 PDF에 포함되지 않았습니다. 원본 이름과 스타일에 맞는 공개 글꼴을 내려받아 적용해 주세요.'
-        : metadata?.unavailableReason ?? '원본 글꼴의 실제 포함 여부를 확인할 수 없습니다.', {kind:'bundled',family:'NanumGothic',bold:font.isBold()});
+      if (!metadata?.usable) throw this.missingSourceFont(choice, metadata?.catalogId ? '원본 글꼴이 PDF에 포함되지 않았습니다.' : metadata?.unavailableReason ?? '원본 글꼴의 실제 포함 여부를 확인할 수 없습니다.', font.isBold());
       return font;
     }
     if (choice.kind === 'downloaded') {
@@ -362,7 +386,7 @@ export async function layoutText(store: NativeTextStore, content: TextContent, o
       if (cp === 9 || cp === 13 || (cp >= 0xd800 && cp <= 0xdfff) || /[\u0590-\u08ff\u0900-\u0dff\u200d\u0300-\u036f]/u.test(char)) throw new NativeEditError('UNSUPPORTED_TEXT',`지원하지 않는 문자 조합: U+${cp.toString(16).toUpperCase()}`);
       const gid = store.encodeCharacter(style.font, font, cp);
       if (!gid) {
-        if (style.font.kind === 'source') throw new NativeEditError('FONT_SUBSTITUTION_REQUIRED','원본 글꼴에 필요한 문자가 없어 대체 글꼴이 필요합니다',{kind:'bundled',family:'NanumGothic',bold:font.isBold()});
+        if (style.font.kind === 'source') throw store.missingSourceFont(style.font, `PDF에 포함된 원본 글꼴에는 입력한 문자 U+${cp.toString(16).toUpperCase()}가 없습니다.`, font.isBold());
         throw new NativeEditError('MISSING_GLYPH',`선택한 글꼴에 U+${cp.toString(16).toUpperCase()} 문자가 없습니다.`);
       }
       units.push({text:char,gid,font,style,advance:font.advanceGlyph(gid)*style.sizePt,cluster});

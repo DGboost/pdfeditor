@@ -10,6 +10,7 @@ export interface PdfDocumentController {
   error: string | null;
   open(source: Blob, password?: string, beforeCommit?: (info: SourceInfo) => void, fontAssets?: DownloadedFontAsset[]): Promise<SourceInfo>;
   downloadFont(choice: Extract<FontChoice, { kind: 'source' }>): Promise<DownloadedFontAsset>;
+  importFont(choice: Extract<FontChoice, { kind: 'source' }>, file: File): Promise<DownloadedFontAsset>;
   registerFonts(assets: DownloadedFontAsset[]): Promise<void>;
   text(index: number): Promise<SourceTextPage>;
   copySourceText(index: number, start: Point, end: Point): Promise<string>;
@@ -178,6 +179,12 @@ export function usePdfDocument(options?: { onProgress?: (current: number, total:
     if (active.current !== session) throw aborted();
     return asset;
   }, [requireSession]);
+  const importFont = useCallback(async (choice: Extract<FontChoice, { kind: 'source' }>, file: File) => {
+    const session = requireSession();
+    const asset = await session.request('importFont', [choice, file, file.name]);
+    if (active.current !== session) throw aborted();
+    return asset;
+  }, [requireSession]);
   const registerFonts = useCallback(async (assets: DownloadedFontAsset[]) => {
     const session = requireSession();
     if (!assets.length) return;
@@ -224,5 +231,5 @@ export function usePdfDocument(options?: { onProgress?: (current: number, total:
     active.current = null;
     retained.current = null;
   }, []);
-  return { info, sessionId, isOpening, error, open, downloadFont, registerFonts, text, copySourceText, validate, render, export: exportSnapshot, retry, close };
+  return { info, sessionId, isOpening, error, open, downloadFont, importFont, registerFonts, text, copySourceText, validate, render, export: exportSnapshot, retry, close };
 }

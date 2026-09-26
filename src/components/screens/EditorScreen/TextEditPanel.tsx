@@ -15,6 +15,7 @@ export interface TextEditPanelProps {
   sourceFonts?: SourceFontInfo[];
   fontAssets?: DownloadedFontAsset[];
   downloadFont: (font: Extract<FontChoice, { kind: 'source' }>) => Promise<DownloadedFontAsset>;
+  importFont: (font: Extract<FontChoice, { kind: 'source' }>, file: File) => Promise<DownloadedFontAsset>;
   baseRevision: number;
   validate: (page: Page, revision: number, candidateRevision?: number) => Promise<EditValidation>;
   getRevision: () => number;
@@ -263,14 +264,14 @@ export function TextEditPanel(props: TextEditPanelProps) {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); void apply(false); }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); localUndo(event.shiftKey); }
   }
-  async function download(source: Extract<FontChoice, { kind: 'source' }>) {
+  async function download(source: Extract<FontChoice, { kind: 'source' }>, load = () => current.current.downloadFont(source)) {
     if (!active.current || downloadingRef.current || lockedRef.current || composing.current || current.current.disabled) return;
     const revision = current.current.baseRevision;
     downloadingRef.current = true;
     setDownloading(fontValue(source));
     setError(null);
     try {
-      const asset = await current.current.downloadFont(source);
+      const asset = await load();
       if (!active.current || current.current.getRevision() !== revision || current.current.baseRevision !== revision) return;
       const snapshot = live.current;
       const runs = snapshot.content.runs.map(run => run.style.font.kind === 'source' && run.style.font.sourcePageIndex === source.sourcePageIndex && run.style.font.fontKey === source.fontKey
@@ -378,12 +379,21 @@ export function TextEditPanel(props: TextEditPanelProps) {
           {info?.catalogId ? <><div>같은 이름·스타일의 공개 라이선스 글꼴을 사용할 수 있습니다. 필요한 글꼴·라이선스만 GitHub에서 가져오며 PDF는 전송하지 않습니다.</div>
             <button type="button" disabled={unavailable || composing.current || !matching} onClick={() => void download(source)}>
               {downloading === fontValue(source) ? '다운로드 중…' : matching ? '다운로드해서 적용' : '초안에서 다른 글꼴 사용 중'}
-            </button></> : <div>{info?.unavailableReason || '일치하는 다운로드 글꼴을 찾을 수 없습니다.'}</div>}
+            </button></> : <><div>{info?.unavailableReason || '일치하는 다운로드 글꼴을 찾을 수 없습니다.'}</div>
+            {info && info.embedded !== 'unknown' && <>
+              <div>제작사나 공식 배포처에서 ‘{info.declaredName.replace(/^[A-Z]{6}\+/, '')}’ 글꼴 파일(TTF/OTF/TTC)을 직접 받은 뒤 선택해 주세요. 파일은 이 브라우저에서만 확인하며 서버로 보내지 않습니다. 글꼴 사용 권한은 해당 글꼴의 라이선스를 따릅니다.</div>
+              <label>{downloading === fontValue(source) ? '불러오는 중…' : matching ? '글꼴 파일 불러오기' : '초안에서 다른 글꼴 사용 중'} <input type="file" accept=".ttf,.otf,.ttc,font/ttf,font/otf,font/collection"
+                style={{ width: '100%' }} disabled={unavailable || composing.current || !matching} onChange={event => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) void download(source, () => current.current.importFont(source, file));
+                }} /></label>
+            </>}</>}
         </div>;
       })}
-      <p role="note">다운로드한 글꼴은 이 편집 초안의 같은 원본 글꼴에만 적용합니다. 아래 ‘적용’으로 확정하며 ‘취소’하면 문서는 바뀌지 않습니다. 원본과 제작 버전·글자 폭이 다를 수 있습니다.</p>
+      <p role="note">다운로드하거나 불러온 글꼴은 이 편집 초안의 같은 원본 글꼴에만 적용합니다. 아래 ‘적용’으로 확정하며 ‘취소’하면 문서는 바뀌지 않습니다. 원본과 제작 버전·글자 폭이 다를 수 있습니다.</p>
     </div>}
-    {downloadedChoices.length > 0 && <p role="status">다운로드 글꼴: {downloadedChoices.map(id => assets.find(asset => asset.id === id)?.postScriptName || '저장된 글꼴').join(', ')}</p>}
+    {downloadedChoices.length > 0 && <p role="status">추가한 글꼴: {downloadedChoices.map(id => assets.find(asset => asset.id === id)?.postScriptName || '저장된 글꼴').join(', ')}</p>}
     </div>
     <div className="text-edit-panel-actions"><button type="button" disabled={unavailable || composing.current} onClick={() => void apply(false)}>{busy ? '검증 중…' : '적용'}</button><button type="button" onClick={cancel}>취소</button></div>
   </section>;

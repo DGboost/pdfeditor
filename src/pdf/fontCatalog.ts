@@ -1,4 +1,4 @@
-import type { DownloadedFontAsset, FontChoice } from '../types/pdfEditor';
+import type { CatalogFontAsset, FontChoice } from '../types/pdfEditor';
 import { sha256Hex } from '../utils/crypto';
 
 export interface CatalogFace {
@@ -35,20 +35,20 @@ export function findCatalogFace(postScriptName: string): CatalogFace | undefined
   const name = postScriptName.replace(/^[A-Z]{6}\+/, '');
   return faces.find(face => face.postScriptName === name);
 }
-export function matchesCatalogAsset(asset: DownloadedFontAsset): boolean {
+export function matchesCatalogAsset(asset: CatalogFontAsset): boolean {
   const face = getCatalogFace(asset.catalogId);
   return !!face && asset.id === face.sha256 && asset.family === face.family &&
     asset.postScriptName === face.postScriptName && asset.weight === face.weight && asset.italic === face.italic &&
     asset.sourceUrl === face.url && asset.licenseText === face.licenseText && asset.bytes instanceof Blob && asset.bytes.size > 0;
 }
-export async function verifyFontAsset(asset: DownloadedFontAsset): Promise<Uint8Array> {
+export async function verifyFontAsset(asset: CatalogFontAsset): Promise<Uint8Array> {
   if (!matchesCatalogAsset(asset)) throw new Error('지원 목록과 일치하지 않는 글꼴 데이터입니다.');
   const bytes = new Uint8Array(await asset.bytes.arrayBuffer());
   const hash = await sha256Hex(bytes);
   if (hash !== asset.id) throw new Error('다운로드한 글꼴 파일의 무결성을 확인할 수 없습니다.');
   return bytes;
 }
-export async function downloadCatalogFont(face: CatalogFace, loadBundled: (choice: Extract<FontChoice, {kind:'bundled'}>) => Promise<Uint8Array>): Promise<DownloadedFontAsset> {
+export async function downloadCatalogFont(face: CatalogFace, loadBundled: (choice: Extract<FontChoice, {kind:'bundled'}>) => Promise<Uint8Array>): Promise<CatalogFontAsset> {
   let bytes: Uint8Array;
   if (face.bundled) bytes = await loadBundled(face.bundled);
   else {

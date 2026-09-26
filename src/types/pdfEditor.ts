@@ -10,10 +10,16 @@ export type FontChoice =
   | { kind: 'source'; sourcePageIndex: number; fontKey: string }
   | { kind: 'downloaded'; assetId: string }
   | { kind: 'bundled'; family: 'NanumGothic' | 'NanumMyeongjo' | 'Courier'; bold: boolean };
-export interface DownloadedFontAsset {
+export interface CatalogFontAsset {
   id: string; catalogId: string; family: string; postScriptName: string;
   weight: number; italic: boolean; bytes: Blob; licenseText: string; sourceUrl: string;
 }
+/** A font file the user obtained themselves; it never leaves this browser except inside exported PDFs. */
+export interface LocalFontAsset {
+  origin: 'local'; id: string; fileName: string; subfont: number; family: string; postScriptName: string;
+  weight: number; italic: boolean; bytes: Blob;
+}
+export type DownloadedFontAsset = CatalogFontAsset | LocalFontAsset;
 export interface TextStyle { font: FontChoice; sizePt: number; color: RGB }
 export interface StyledRun { text: string; style: TextStyle }
 export interface TextContent { runs: StyledRun[]; align: 'left' | 'center' | 'right' }

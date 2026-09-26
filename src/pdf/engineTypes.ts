@@ -27,6 +27,7 @@ export interface NativePdfApi {
   open(source: Blob, password?: string): Promise<SourceInfo>;
   text(sourcePageIndex: number): Promise<SourceTextPage>;
   downloadFont(choice: Extract<FontChoice, { kind: 'source' }>): Promise<DownloadedFontAsset>;
+  importFont(choice: Extract<FontChoice, { kind: 'source' }>, file: Blob, fileName: string): Promise<DownloadedFontAsset>;
   registerFonts(assets: DownloadedFontAsset[]): Promise<void>;
   copySourceText(sourcePageIndex: number, start: Point, end: Point): Promise<string>;
   validate(page: Page): Promise<EditValidation>;
