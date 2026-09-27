@@ -65,6 +65,8 @@ export function OfficeRegionScreen(p: Props) {
   const scrolling = useRef<Promise<void>>(Promise.resolve());
   const [viewportEpoch, setViewportEpoch] = useState(0);
   const viewportEpochRef = useRef(viewportEpoch);
+  const interaction = useRef(0);
+  const focusedCard = useRef<{ id: string; element: HTMLTextAreaElement; interaction: number } | null>(null);
   viewportEpochRef.current = viewportEpoch;
   const region = p.session.region;
   const locatorList = p.config.mappings.map(mapping => mapping.anchor.kind === 'pdf' ? '' : mapping.anchor.locator);
@@ -148,7 +150,16 @@ export function OfficeRegionScreen(p: Props) {
   useEffect(() => { if (ready) p.mount.inert = p.config.reviewed || p.busy; }, [ready, p.mount, p.busy, p.config.reviewed]);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; generation.current++; gesture.current = null; };
+    const pointer = () => { interaction.current++; };
+    const navigation = (event: KeyboardEvent) => { if (event.key === 'Tab' || event.key === 'Escape') interaction.current++; };
+    document.addEventListener('pointerdown', pointer, true);
+    document.addEventListener('keydown', navigation, true);
+    return () => {
+      document.removeEventListener('pointerdown', pointer, true);
+      document.removeEventListener('keydown', navigation, true);
+      focusedCard.current = null;
+      mounted.current = false; generation.current++; gesture.current = null;
+    };
   }, []);
 
   const setDirty = () => { if (mounted.current) latest.current.onUnappliedEditChange(dirty.current.size > 0 || composing.current.size > 0 || !!worker.current); };
@@ -229,6 +240,20 @@ export function OfficeRegionScreen(p: Props) {
     setError(id, '');
     setDirty();
     if (!composingNow) process();
+  };
+  const restoreCardFocus = (id: string, element: HTMLTextAreaElement, relatedTarget: EventTarget | null) => {
+    const focused = focusedCard.current;
+    if (relatedTarget || focused?.id !== id || focused.element !== element) return;
+    const start = element.selectionStart, end = element.selectionEnd, direction = element.selectionDirection;
+    queueMicrotask(() => {
+      if (mounted.current && worker.current && focusedCard.current === focused
+        && interaction.current === focused.interaction && document.hasFocus()
+        && document.activeElement === document.body && element.isConnected
+        && !latest.current.busy && config.current.reviewed && config.current.selectedIds.includes(id)) {
+        element.focus({ preventScroll: true });
+        element.setSelectionRange(start, end, direction);
+      }
+    });
   };
   const flush = useCallback(async () => {
     if (composing.current.size) { latest.current.onError('입력 조합이 끝난 뒤 다시 시도해 주세요.'); return false; }
@@ -452,6 +477,11 @@ export function OfficeRegionScreen(p: Props) {
               disabled={!!unresolvedReason || (p.busy && !composing.current.has(mapping.id)) || mapping.role === 'locked'}
               value={drafts[mapping.id] ?? mapping.currentText}
               onChange={event => changeDraft(mapping.id, event.target.value, composing.current.has(mapping.id))}
+              onFocus={event => { focusedCard.current = { id: mapping.id, element: event.currentTarget, interaction: interaction.current }; }}
+              onSelect={event => {
+                if (focusedCard.current?.element === event.currentTarget) focusedCard.current.interaction = interaction.current;
+              }}
+              onBlur={event => restoreCardFocus(mapping.id, event.currentTarget, event.relatedTarget)}
               onCompositionStart={() => { composing.current.add(mapping.id); setDirty(); }}
               onCompositionEnd={event => endComposition(mapping.id, event)}
               onKeyDown={event => { if (event.nativeEvent.isComposing) return; event.stopPropagation(); }}
