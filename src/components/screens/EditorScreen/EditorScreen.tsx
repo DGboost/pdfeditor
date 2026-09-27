@@ -6,10 +6,12 @@ import type { DocumentActions } from '../../../hooks/useDocumentReducer';
 import type { PdfDocumentController } from '../../../hooks/usePdfDocument';
 import type { EditableTextTarget, RenderedPage, SourceFontInfo, SourceTextLine } from '../../../pdf/engineTypes';
 import type { SaveStatus } from '../../../utils/db';
+import type { RegionConfig } from '../../../documents/regionTypes';
 import { plainText } from '../../../pdf/textEditing';
 import { buildSourceTextGroup } from '../../../pdf/sourceTextGroups';
 import { ACCENT, BORDER, BORDER_STRONG, PANEL_SHADOW, SURFACE, TEXT, TEXT_SUBTLE, CANVAS_BG, TOOLBAR_H, RAIL_CARD_H, toolBase, toolActive } from '../../../styles/theme';
 import { PdfPageSurface } from './PdfPageSurface';
+import { PdfRegionScreen } from './PdfRegionScreen';
 import { PageThumbnail } from './GridView';
 import { TextEditPanel } from './TextEditPanel';
 import { DocumentHeader } from '../../editor/DocumentHeader';
@@ -26,12 +28,20 @@ export interface EditorScreenProps {
   onFileNameChange: (s: string) => void; saveStatus: SaveStatus; saveError: string | null; onRetrySave: () => void;
   hasUnappliedEdit: boolean; onUnappliedEditChange: (v: boolean) => void;
   registerEditController: (c: EditController | null) => void;
+  regionConfig?: RegionConfig; onRegionChange?: (next: RegionConfig) => void;
 }
 interface EditSelection { id: number; pageId: string; target: EditableTextTarget; original?: SourceTextLine; fonts?: SourceFontInfo[]; revision: number }
 const labels: Record<Tool, string> = { pan: '손 도구', select: '선택' };
 const toolIcons = { pan: Hand, select: MousePointer2 };
 const saveLabels: Record<SaveStatus, string> = { dirty: '저장되지 않은 변경', saving: '저장 중…', saved: '자동 저장됨', error: '저장 실패 · 다시 시도' };
 export function EditorScreen(p: EditorScreenProps) {
+  if (p.regionConfig) {
+    if (!p.onRegionChange) throw new Error('보호 영역 설정 변경 콜백이 필요합니다.');
+    return <PdfRegionScreen {...p} regionConfig={p.regionConfig} onRegionChange={p.onRegionChange} />;
+  }
+  return <NormalEditorScreen {...p} />;
+}
+function NormalEditorScreen(p: EditorScreenProps) {
   const { workspace, engine, docActions } = p;
   const page = workspace.pages.find(item => item.id === workspace.activePageId)!;
   const index = workspace.pages.indexOf(page);

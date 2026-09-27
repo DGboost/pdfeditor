@@ -43,6 +43,12 @@ export async function createRhwpSession(options: OfficeSessionOptions): Promise<
     });
     requireLive();
     const host = editor.host;
+    let serialized: Promise<void> = Promise.resolve();
+    const ordered = <T,>(action: () => Promise<T>): Promise<T> => {
+      const result = serialized.then(action);
+      serialized = result.then(() => undefined, () => undefined);
+      return result;
+    };
     cleanup.push(host.onState(value => {
       try { accept(value); } catch (error) { dispatch('office-error', error instanceof Error ? error.message : String(error)); }
     }));
@@ -56,7 +62,7 @@ export async function createRhwpSession(options: OfficeSessionOptions): Promise<
     if (!state!.ready) throw new Error('한글 문서의 첫 화면이 준비되지 않았습니다.');
     async function serialize() {
       requireLive();
-      const value = await host.exportReported();
+      const value = await ordered(() => host.exportReported());
       requireLive();
       if (!value || typeof value !== 'object') throw new Error('잘못된 내보내기 응답입니다.');
       const artifact = value as { revision: number; format: unknown; bytes: unknown; contentLoss: unknown };
@@ -73,6 +79,44 @@ export async function createRhwpSession(options: OfficeSessionOptions): Promise<
     return {
       getState() { return state; },
       subscribe(listener) { requireLive(); listeners.add(listener); return () => listeners.delete(listener); },
+      region: {
+        async targets(locators) {
+          requireLive();
+          const targets = await ordered(() => host.regionTargets(locators));
+          requireLive();
+          return targets;
+        },
+        async capture() {
+          requireLive();
+          const captured = await ordered(() => host.regionCapture());
+          requireLive();
+          return captured;
+        },
+        async replace(locator, expectedText, value, expectedRevision, locatorsToRebase) {
+          requireLive();
+          const result = await ordered(() => host.regionReplace(locator, expectedText, value, expectedRevision, locatorsToRebase));
+          requireLive();
+          accept(await host.getState());
+          return result;
+        },
+        async highlight(locator) {
+          requireLive();
+          const result = await ordered(() => host.regionHighlight(locator));
+          requireLive();
+          return result;
+        },
+        async setMode(mode) {
+          requireLive();
+          await ordered(() => host.regionSetMode(mode));
+          requireLive();
+          accept(await host.getState());
+        },
+        async scroll(dx, dy) {
+          requireLive();
+          await ordered(() => host.regionScroll(dx, dy));
+          requireLive();
+        },
+      },
       interaction: {
         async execute(command) {
           requireLive();
@@ -109,12 +153,13 @@ export async function createRhwpSession(options: OfficeSessionOptions): Promise<
       },
       async execute(command) {
         requireLive();
-        const result = await host.applyCharProperties(command, state.selectionRevision);
+        const selectionRevision = state.selectionRevision;
+        const result = await ordered(() => host.applyCharProperties(command, selectionRevision));
         requireLive();
         accept(await host.getState());
         return result;
       },
-      async flush() { requireLive(); const result = await host.flush(); requireLive(); return result; },
+      async flush() { requireLive(); const result = await ordered(() => host.flush()); requireLive(); return result; },
       async captureCheckpoint() {
         const captured = await serialize();
         if (captured.warnings.length) throw new Error(`자동 저장에 손실 위험이 있습니다. 수정본을 확인하여 다운로드하세요.\n${captured.warnings.join('\n')}`);

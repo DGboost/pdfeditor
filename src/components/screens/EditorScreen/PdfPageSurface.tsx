@@ -12,6 +12,9 @@ export interface PdfPageSurfaceProps {
   onSelect: (target: EditableTextTarget, additive: boolean) => void;
   onSelectMany: (targets: EditableTextTarget[], additive: boolean) => void;
   onClearSelection: () => void;
+  targets?: readonly EditableTextTarget[];
+  regionMode?: boolean;
+  onTargetElement?: (target: EditableTextTarget, element: HTMLButtonElement | null) => void;
 }
 export function PdfPageSurface(p: PdfPageSurfaceProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -30,13 +33,13 @@ export function PdfPageSurface(p: PdfPageSurfaceProps) {
       const q = transformPoint([x, y], r.pageToRaster);
       return [(q[0] - r.pixelOrigin[0]) * cssWidth / r.width, (q[1] - r.pixelOrigin[1]) * cssHeight / r.height];
     };
-    return r.textTargets.map(target => {
+    return (p.targets ?? r.textTargets).map(target => {
       const [x0, y0, x1, y1] = target.bounds;
       const points = [rasterPoint(x0, y0), rasterPoint(x1, y0), rasterPoint(x0, y1), rasterPoint(x1, y1)];
       const xs = points.map(q => q[0]), ys = points.map(q => q[1]);
       return { target, box: { left: Math.min(...xs), top: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) } };
     });
-  }, [r, cssWidth, cssHeight]);
+  }, [r, p.targets, cssWidth, cssHeight]);
   const pointer = useCanvasPointerInteractions({
     pageId: p.page.id, tool: p.tool, scrollRef: p.scrollRef, disabled: p.disabled, geometry, multiSelect: p.multiSelect,
     onTap: (target, additive) => {
@@ -58,9 +61,9 @@ export function PdfPageSurface(p: PdfPageSurfaceProps) {
     {hitboxes.map(({ target: t, box }, index) => {
       const id = t.lineIds[0];
       const selected = t.lineIds.some(member => p.selectedIds.includes(member));
-      return <button key={id} data-text-target={index} className="pdfe-text-hit" disabled={p.disabled} aria-label={t.lineIds.length > 1 ? '묶은 텍스트 선택' : '원본 텍스트 선택'} aria-pressed={selected} title={t.reason || (p.multiSelect ? '클릭 또는 Enter로 선택 추가/해제 · 연속된 줄은 자동으로 묶어서 편집합니다.' : '클릭 또는 Enter로 텍스트 편집 · Ctrl/Cmd/Shift로 여러 줄 선택')} style={{ ...box, outline: selected ? `2px solid ${ACCENT}` : undefined, pointerEvents: p.tool === 'select' ? 'auto' : 'none' }}
-        onClick={e => { if (p.tool === 'select' && !p.disabled) p.onSelect(t, p.multiSelect || e.ctrlKey || e.metaKey || e.shiftKey); }}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelect(t, p.multiSelect || e.ctrlKey || e.metaKey || e.shiftKey); } }} />;
+      return <button key={id} ref={element => p.onTargetElement?.(t, element)} data-text-target={index} className="pdfe-text-hit" disabled={p.disabled} aria-label={p.regionMode ? `원본 텍스트 ${index + 1} 선택` : t.lineIds.length > 1 ? '묶은 텍스트 선택' : '원본 텍스트 선택'} aria-pressed={selected} title={t.reason || (p.regionMode ? '클릭 또는 드래그로 원본 줄 선택' : p.multiSelect ? '클릭 또는 Enter로 선택 추가/해제 · 연속된 줄은 자동으로 묶어서 편집합니다.' : '클릭 또는 Enter로 텍스트 편집 · Ctrl/Cmd/Shift로 여러 줄 선택')} style={{ ...box, outline: selected ? `2px solid ${ACCENT}` : undefined, pointerEvents: p.tool === 'select' ? 'auto' : 'none' }}
+        onClick={e => { if (p.tool === 'select' && !p.disabled) p.onSelect(t, p.regionMode || p.multiSelect || e.ctrlKey || e.metaKey || e.shiftKey); }}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onSelect(t, p.regionMode || p.multiSelect || e.ctrlKey || e.metaKey || e.shiftKey); } }} />;
     })}
     {pointer.rectangle && <div aria-hidden="true" style={{ position: 'absolute', ...pointer.rectangle, boxSizing: 'border-box', border: '1px solid #222', background: 'rgba(0, 0, 0, 0.08)', pointerEvents: 'none' }} />}
   </div>;

@@ -52,6 +52,15 @@ export async function createOfficeSession(options: OfficeSessionOptions): Promis
       execute: (command: Parameters<typeof session.interaction.execute>[0]) => serial(() => session.interaction!.execute(command)),
       selectedText: () => serial(() => session.interaction!.selectedText()),
     } } : {}),
+    ...(session.region ? { region: {
+      targets: (locators: string[]) => serial(() => session.region!.targets(locators)),
+      capture: () => serial(() => session.region!.capture()),
+      replace: (locator: string, expectedText: string, value: string, expectedRevision: number, locatorsToRebase: string[]) =>
+        serial(() => session.region!.replace(locator, expectedText, value, expectedRevision, locatorsToRebase)),
+      highlight: (locator: string) => serial(() => session.region!.highlight(locator)),
+      setMode: (mode: 'normal' | 'mapping' | 'protected') => serial(() => session.region!.setMode(mode)),
+      scroll: (dx: number, dy: number) => serial(() => session.region!.scroll(dx, dy)),
+    } } : {}),
     flush: () => serial(flush),
     captureCheckpoint: () => serial(capture),
     serialize: () => serial(serialize),

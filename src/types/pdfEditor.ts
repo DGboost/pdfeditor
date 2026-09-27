@@ -1,3 +1,4 @@
+import type { RegionConfig } from '../documents/regionTypes';
 export type Screen = 'upload' | 'editor';
 export type Tool = 'pan' | 'select';
 export type QuarterTurn = 0 | 90 | 180 | 270;
@@ -42,8 +43,9 @@ export interface Workspace {
   id: string; fileName: string; source: Blob; sourceHash: string;
   pages: Page[]; activePageId: string;
   fontAssets?: DownloadedFontAsset[];
+  region?: RegionConfig;
 }
-export interface DocumentSnapshot { pages: Page[]; activePageId: string; fontAssets?: DownloadedFontAsset[] }
+export interface DocumentSnapshot { pages: Page[]; activePageId: string; fontAssets?: DownloadedFontAsset[]; region?: RegionConfig }
 export interface DocumentState {
   workspace: Workspace | null; revision: number;
   history: { undo: DocumentSnapshot[]; redo: DocumentSnapshot[] };

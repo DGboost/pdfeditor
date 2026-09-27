@@ -21160,14 +21160,14 @@ index 93f9a072d85608e70979514347631ac4bbdf0b97..b6cff5a05fd8bd469b840316ba784626
    }, 3000)
  }
 diff --git a/tsconfig.app.json b/tsconfig.app.json
-index 491e0939517a1abe867467092ef20d2be1fbd692..6f58fe211cd600adb66185fef96a573aaab765f7 100644
+index 491e0939517a1abe867467092ef20d2be1fbd692..c9a7895f5a01379b15f0dc57b000e80a7dc3c4c4 100644
 --- a/tsconfig.app.json
 +++ b/tsconfig.app.json
 @@ -1,6 +1,6 @@
  {
    "extends": "@vue/tsconfig/tsconfig.dom.json",
 -  "include": ["env.d.ts", "src/**/*", "src/**/*.vue"],
-+  "include": ["env.d.ts", "src/**/*", "src/**/*.vue", "../../src/documents/officeTypes.ts", "../../src/documents/formats.ts", "../../src/documents/frameBridge.ts"],
++  "include": ["env.d.ts", "src/**/*", "src/**/*.vue", "../../src/documents/officeTypes.ts", "../../src/documents/regionTypes.ts", "../../src/documents/formats.ts", "../../src/documents/frameBridge.ts"],
    "exclude": ["src/**/__tests__/*"],
    "compilerOptions": {
      "composite": true,

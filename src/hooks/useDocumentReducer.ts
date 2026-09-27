@@ -4,6 +4,7 @@ import type {
   SourceTextEdit, Workspace,
 } from '../types/pdfEditor';
 import { validateFontAssets } from '../utils/db';
+import type { RegionConfig } from '../documents/regionTypes';
 
 export const initialDocumentState: DocumentState = {
   workspace: null, revision: 0, history: { undo: [], redo: [] },
@@ -14,7 +15,9 @@ export type DocumentAction =
   | { type: 'RESTORE_STATE'; workspace: Workspace; restoredRevision?: number }
   | { type: 'SET_ACTIVE_PAGE'; id: string }
   | { type: 'SET_FILE_NAME'; name: string }
+  | { type: 'SET_REGION'; region: RegionConfig }
   | { type: 'UPSERT_TEXT_EDIT'; pageId: string; edit: SourceTextEdit; fontAssets?: DownloadedFontAsset[] }
+  | { type: 'UPSERT_REGION_TEXT'; pageId: string; mappingId: string; edit: SourceTextEdit; fontAssets?: DownloadedFontAsset[] }
   | { type: 'REMOVE_TEXT_EDIT'; pageId: string; lineId: string }
   | { type: 'DUPLICATE_PAGE'; id: string; newId: string }
   | { type: 'ROTATE_PAGE'; id: string; delta: number }
@@ -40,7 +43,7 @@ function equal(a: unknown, b: unknown): boolean {
 }
 
 function snapshot(workspace: Workspace): DocumentSnapshot {
-  return { pages: workspace.pages, activePageId: workspace.activePageId, ...('fontAssets' in workspace ? { fontAssets: workspace.fontAssets } : {}) };
+  return { pages: workspace.pages, activePageId: workspace.activePageId, ...('fontAssets' in workspace ? { fontAssets: workspace.fontAssets } : {}), ...('region' in workspace ? { region: workspace.region } : {}) };
 }
 
 function mapPage(workspace: Workspace, id: string, update: (page: Page) => Page): Workspace {
@@ -117,7 +120,10 @@ function changeWorkspace(workspace: Workspace, action: DocumentAction): Workspac
       const index = workspace.pages.findIndex((p) => p.id === action.id);
       if (workspace.pages.length <= 1 || index < 0) return workspace;
       const pages = workspace.pages.filter((p) => p.id !== action.id);
-      return { ...workspace, pages, activePageId: workspace.activePageId === action.id ? pages[Math.min(index, pages.length - 1)].id : workspace.activePageId };
+      const mappings = workspace.region?.mappings.filter(mapping => mapping.anchor.kind !== 'pdf' || mapping.anchor.pageId !== action.id);
+      const region = workspace.region && mappings ? { ...workspace.region, mappings,
+        selectedIds: workspace.region.selectedIds.filter(id => mappings.some(mapping => mapping.id === id)) } : undefined;
+      return { ...workspace, pages, ...(region ? { region } : {}), activePageId: workspace.activePageId === action.id ? pages[Math.min(index, pages.length - 1)].id : workspace.activePageId };
     }
     case 'ADD_PAGE':
       return hasId(workspace, action.page.id) ? workspace : { ...workspace, pages: [...workspace.pages, action.page], activePageId: action.page.id };
@@ -153,6 +159,11 @@ export function documentReducer(state: DocumentState, action: DocumentAction): D
     // pending text edit and invalidate every page raster.
     return { ...state, workspace: { ...workspace, fileName: action.name } };
   }
+  if (action.type === 'SET_REGION') {
+    if (equal(workspace.region, action.region)) return state;
+    if (workspace.region?.reviewed && action.region.reviewed && !equal(workspace.region.mappings, action.region.mappings)) return state;
+    return { ...state, workspace: { ...workspace, region: action.region } };
+  }
   if (action.type === 'UNDO' || action.type === 'REDO') {
     const { undo, redo } = state.history;
     const stack = action.type === 'UNDO' ? undo : redo;
@@ -160,6 +171,8 @@ export function documentReducer(state: DocumentState, action: DocumentAction): D
     const next = stack[stack.length - 1];
     const restored = { ...workspace, ...next };
     if (!('fontAssets' in next)) delete restored.fontAssets;
+    if (!('region' in next)) delete restored.region;
+    if (restored.region?.reviewed) restored.region = { ...restored.region, reviewed: false, selectedIds: [] };
     return {
       workspace: restored, revision: state.revision + 1,
       history: action.type === 'UNDO'
@@ -167,11 +180,34 @@ export function documentReducer(state: DocumentState, action: DocumentAction): D
         : { undo: [...undo.slice(-19), snapshot(workspace)], redo: redo.slice(0, -1) },
     };
   }
+  if (action.type === 'UPSERT_REGION_TEXT') {
+    const region = workspace.region;
+    const mapping = region?.mappings.find(item => item.id === action.mappingId);
+    const anchor = mapping?.anchor;
+    const page = workspace.pages.find(item => item.id === action.pageId);
+    if (!region?.reviewed || !mapping || mapping.role === 'locked' || anchor?.kind !== 'pdf'
+      || page?.kind !== 'pdf' || anchor.pageId !== page.id || anchor.sourcePageIndex !== page.sourcePageIndex
+      || anchor.lineIds.length !== action.edit.lineIds.length
+      || anchor.lineIds.some((id, index) => id !== action.edit.lineIds[index])
+      || region.mappings.some(item => item.role === 'locked' && item.anchor.kind === 'pdf'
+        && item.anchor.pageId === page.id && item.anchor.lineIds.some(id => anchor.lineIds.includes(id)))) return state;
+    const edited = changeWorkspace(workspace, { type: 'UPSERT_TEXT_EDIT', pageId: action.pageId, edit: action.edit });
+    if (edited === workspace) return state;
+    const currentText = action.edit.content.runs.map(run => run.text).join('');
+    const next = mergeReferencedFonts({ ...edited, region: {
+      ...region, mappings: region.mappings.map(item => item.id === mapping.id ? { ...item, currentText } : item),
+    } }, action.fontAssets);
+    return {
+      workspace: next, revision: state.revision + 1,
+      history: { undo: [...state.history.undo.slice(-19), snapshot(workspace)], redo: [] },
+    };
+  }
   let next = changeWorkspace(workspace, action);
   if (next === workspace) return state;
   if (action.type === 'UPSERT_TEXT_EDIT') {
     next = mergeReferencedFonts(next, action.fontAssets);
   }
+  if (next.region?.reviewed) next = { ...next, region: { ...next.region, reviewed: false, selectedIds: [] } };
   return {
     workspace: next, revision: state.revision + 1,
     history: { undo: [...state.history.undo.slice(-19), snapshot(workspace)], redo: [] },
@@ -183,7 +219,9 @@ export interface DocumentActions {
   restoreState(workspace: Workspace, restoredRevision?: number): void;
   setActivePage(id: string): void;
   setFileName(name: string): void;
+  setRegion(region: RegionConfig): void;
   upsertTextEdit(pageId: string, edit: SourceTextEdit, fontAssets?: DownloadedFontAsset[]): void;
+  upsertRegionText(pageId: string, mappingId: string, edit: SourceTextEdit, fontAssets?: DownloadedFontAsset[]): void;
   removeTextEdit(pageId: string, lineId: string): void;
   duplicatePage(id: string, newId: string): void;
   rotatePage(id: string, delta: number): void;
@@ -209,7 +247,9 @@ export function useDocumentReducer() {
     restoreState: (workspace, restoredRevision) => dispatch({ type: 'RESTORE_STATE', workspace, restoredRevision }),
     setActivePage: (id) => dispatch({ type: 'SET_ACTIVE_PAGE', id }),
     setFileName: (name) => dispatch({ type: 'SET_FILE_NAME', name }),
+    setRegion: (region) => dispatch({ type: 'SET_REGION', region }),
     upsertTextEdit: (pageId, edit, fontAssets) => dispatch({ type: 'UPSERT_TEXT_EDIT', pageId, edit, fontAssets }),
+    upsertRegionText: (pageId, mappingId, edit, fontAssets) => dispatch({ type: 'UPSERT_REGION_TEXT', pageId, mappingId, edit, fontAssets }),
     removeTextEdit: (pageId, lineId) => dispatch({ type: 'REMOVE_TEXT_EDIT', pageId, lineId }),
     duplicatePage: (id, newId) => dispatch({ type: 'DUPLICATE_PAGE', id, newId }),
     rotatePage: (id, delta) => dispatch({ type: 'ROTATE_PAGE', id, delta }),

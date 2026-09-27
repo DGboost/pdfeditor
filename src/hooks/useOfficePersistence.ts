@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OfficeRecord, OfficeSession } from '../documents/officeTypes';
+import type { RegionConfig } from '../documents/regionTypes';
 import { saveOfficeDraft } from '../documents/officeDb';
 import type { SaveStatus } from '../utils/db';
 
@@ -7,6 +8,9 @@ interface OfficePersistenceOptions {
   document: { session: OfficeSession; record: OfficeRecord; initialSaveError: string | null } | null;
   fileName: string;
   getFileName: () => string;
+  region?: RegionConfig;
+  getRegion: () => RegionConfig | undefined;
+  flushOuter: () => Promise<boolean>;
   enabled: boolean;
   onSaved: (record: OfficeRecord) => void;
 }
@@ -60,19 +64,29 @@ export function useOfficePersistence(options: OfficePersistenceOptions): OfficeP
         current.requested = false;
         if (isCurrent()) setView({ session: current.session.getState().sessionId, status: 'saving', error: null });
         try {
+          if (isCurrent() && !await latest.current.flushOuter()) throw new Error('작성 중인 영역 값을 확인한 뒤 다시 저장해 주세요.');
           if (!await current.session.flush()) throw new Error('문서 입력을 확정하지 못했습니다. 편집기로 돌아가 다시 시도해 주세요.');
           const state = current.session.getState();
+          const region = isCurrent() ? latest.current.getRegion() : current.record.region;
+          const regionSnapshot = JSON.stringify(region);
           current.modified ||= state.revision > current.record.revision;
-          const needsCheckpoint = current.modified && (state.revision !== current.record.revision || current.record.checkpoint === null);
+          // DOCX may synthesize paragraph IDs during import. Persist the native model
+          // when the first field is mapped, even before any content mutation.
+          const needsCheckpoint = (current.modified && (state.revision !== current.record.revision || current.record.checkpoint === null))
+            || (current.record.format === 'docx' && !!region?.mappings.length && current.record.checkpoint === null);
           const captured = needsCheckpoint
             ? await current.session.captureCheckpoint()
             : { revision: state.revision, checkpoint: current.record.checkpoint };
+          if (captured.revision !== state.revision || current.session.getState().revision !== state.revision
+            || (isCurrent() && JSON.stringify(latest.current.getRegion()) !== regionSnapshot)) {
+            throw new Error('저장 중 영역이나 원본 내용이 변경되었습니다. 최신 입력을 확인한 뒤 다시 저장해 주세요.');
+          }
           const name = isCurrent() ? latest.current.getFileName() : current.fileName;
           const zoom = current.session.getState().zoom;
           const record: OfficeRecord = {
             ...current.record, fileName: name, zoom, revision: captured.revision,
             checkpoint: captured.checkpoint, checkpointSequence: ++current.sequence,
-            modified: current.modified, savedAt: Date.now(),
+            modified: current.modified, savedAt: Date.now(), ...(region ? { region } : {}),
           };
           await saveOfficeDraft(record);
           current.record = record;
@@ -80,7 +94,8 @@ export function useOfficePersistence(options: OfficePersistenceOptions): OfficeP
           if (isCurrent()) {
             latest.current.onSaved(record);
             const now = current.session.getState();
-            const saved = now.revision === record.revision && now.zoom === record.zoom && latest.current.getFileName() === record.fileName;
+            const saved = now.revision === record.revision && now.zoom === record.zoom && latest.current.getFileName() === record.fileName
+              && JSON.stringify(latest.current.getRegion()) === JSON.stringify(record.region);
             setView({ session: now.sessionId, status: saved ? 'saved' : 'dirty', error: null });
           }
         } catch (error) {
@@ -115,7 +130,8 @@ export function useOfficePersistence(options: OfficePersistenceOptions): OfficeP
     const current = model.current;
     if (!current || !options.enabled) return;
     const state = current.session.getState();
-    const clean = current.persisted && current.record.revision === state.revision && current.record.zoom === state.zoom && current.record.fileName === options.getFileName();
+    const clean = current.persisted && current.record.revision === state.revision && current.record.zoom === state.zoom
+      && current.record.fileName === options.getFileName() && JSON.stringify(current.record.region) === JSON.stringify(options.getRegion());
     if (clean) return;
     setView(previous => ({ session: state.sessionId, status: current.pending ? 'saving' : previous.session === state.sessionId && previous.error ? 'error' : 'dirty', error: previous.session === state.sessionId ? previous.error : document?.initialSaveError ?? null }));
     if (state.composing) return;
@@ -124,7 +140,7 @@ export function useOfficePersistence(options: OfficePersistenceOptions): OfficeP
       if (!current.session.getState().composing) void flushDraft().catch(() => undefined);
     }, 1500);
     return cancelTimer;
-  }, [document?.session, options.enabled, options.fileName, observed.revision, observed.zoom, observed.composing, cancelTimer, flushDraft]);
+  }, [document?.session, options.enabled, options.fileName, options.region, observed.revision, observed.zoom, observed.composing, cancelTimer, flushDraft]);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; cancelTimer(); }; }, [cancelTimer]);
   const sessionId = document?.session.getState().sessionId;

@@ -1,4 +1,5 @@
 import type { OfficeFormat } from './formats';
+import type { OfficeRegionController, RegionConfig } from './regionTypes';
 
 export type FormatValue<T> =
   | { kind: 'uniform'; value: T }
@@ -48,6 +49,18 @@ export interface OfficeInteractionController {
   selectedText(): Promise<string>;
 }
 
+export type CountMetric =
+  | { kind: 'available'; count: number }
+  | { kind: 'unavailable'; reason: string };
+
+export interface SourceAnalysis {
+  format: 'pdf' | 'docx' | 'hwp' | 'hwpx';
+  pageCount: CountMetric;
+  textLineCount: CountMetric;
+  nativeTableCount: CountMetric;
+  nativeFieldCount: CountMetric;
+}
+
 export interface OfficeState {
   sessionId: string;
   revision: number;
@@ -60,6 +73,7 @@ export interface OfficeState {
   canSaveModified: boolean;
   zoom: number;
   pageView?: OfficePageState;
+  sourceAnalysis?: SourceAnalysis;
   interaction?: OfficeInteractionState;
   enabled: Record<OfficeCommand['type'], boolean>;
   formatting: {
@@ -81,6 +95,7 @@ export type OfficeCheckpoint =
 export interface OfficeSession {
   pageView?: OfficePageController;
   interaction?: OfficeInteractionController;
+  region?: OfficeRegionController;
   getState(): OfficeState;
   subscribe(listener: (state: OfficeState) => void): () => void;
   execute(command: OfficeCommand): Promise<CommandResult>;
@@ -132,6 +147,7 @@ export interface OfficeRecord {
   zoom: number;
   savedAt: number;
   pptxConversionAccepted: boolean;
+  region?: RegionConfig;
 }
 
 export type LibraryKey =

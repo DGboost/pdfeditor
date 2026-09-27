@@ -1,5 +1,6 @@
 import type { Workspace } from '../types/pdfEditor';
 import { getCatalogFace } from '../pdf/fontCatalog';
+import { validateRegionConfig } from '../documents/regionTypes';
 
 const DB_NAME = 'pdfe-draft-db';
 const DRAFT_KEY = 'active-draft';
@@ -87,6 +88,14 @@ function validateWorkspaceRecord(value: unknown): void {
     } else requireValue(page.kind === 'blank' && positive(page.widthPt) && positive(page.heightPt) && !('textEdits' in page));
   }
   requireValue(string(value.activePageId) && value.pages.some(p => p.id === value.activePageId));
+  if (value.region !== undefined) {
+    const region = validateRegionConfig(value.region, 'pdf');
+    for (const mapping of region.mappings) {
+      const anchor = mapping.anchor;
+      if (anchor.kind !== 'pdf' || !value.pages.some(page => page.kind === 'pdf'
+        && page.id === anchor.pageId && page.sourcePageIndex === anchor.sourcePageIndex)) throw new Error('원본 PDF 페이지와 영역 편집 매핑이 일치하지 않습니다.');
+    }
+  }
 }
 export function validateWorkspace(value: unknown): Workspace {
   validateWorkspaceRecord(value);
@@ -214,12 +223,20 @@ export async function loadPdfDraft(): Promise<DraftLoadResult> {
     };
   });
 }
-export async function quarantineActiveDraft(kind: 'legacy' | 'invalid', reason: string): Promise<number> {
+export async function quarantineActiveDraft(kind: 'legacy' | 'invalid', reason: string, expected: PdfDraft): Promise<number | null> {
   return transaction(['drafts', 'retained-drafts'], 'readwrite', (tx, result) => {
     const store = tx.objectStore('drafts'); const request = store.get(DRAFT_KEY);
     request.onsuccess = () => {
-      if (request.result === undefined) { tx.abort(); return; }
-      retain(tx, request.result, kind, reason, id => { store.delete(DRAFT_KEY); result(id); });
+      const raw: unknown = request.result;
+      if (!raw || typeof raw !== 'object') { result(null); return; }
+      const candidate = raw as PdfDraft;
+      if (candidate.version !== expected.version || candidate.workspace?.id !== expected.workspace.id
+        || candidate.workspace?.sourceHash !== expected.workspace.sourceHash
+        || candidate.revision !== expected.revision || candidate.savedAt !== expected.savedAt) {
+        result(null);
+        return;
+      }
+      retain(tx, raw, kind, reason, id => { store.delete(DRAFT_KEY); result(id); });
     };
   });
 }

@@ -14,17 +14,21 @@ const scriptSource = await readFile(fileURLToPath(import.meta.url));
 // Signature of every engine source file (path, size, mtime) plus this script.
 // Build outputs and dependencies are excluded; files a build generates elsewhere
 // are captured because the signature is recorded after the build.
-async function signature(directories) {
+async function signature(sources) {
   const entries = [];
-  async function walk(directory) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
+  async function walk(source) {
+    if (!(await lstat(source)).isDirectory()) {
+      entries.push(source);
+      return;
+    }
+    for (const entry of await readdir(source, { withFileTypes: true })) {
       if (entry.isDirectory() && skippedDirectories.has(entry.name)) continue;
-      const file = path.join(directory, entry.name);
+      const file = path.join(source, entry.name);
       if (entry.isDirectory()) await walk(file);
       else entries.push(file);
     }
   }
-  for (const directory of directories) await walk(path.join(root, directory));
+  for (const source of sources) await walk(path.join(root, source));
   const stats = await Promise.all(entries.map(file => lstat(file)));
   const hash = createHash('sha256').update(scriptSource);
   entries.map((file, i) => `${path.relative(root, file)}\0${stats[i].size}\0${stats[i].mtimeMs}\n`).sort().forEach(line => hash.update(line));
@@ -71,7 +75,7 @@ if (Number(process.versions.node.split('.')[0]) < 22) {
 await mkdir(output, { recursive: true });
 await publish('src/assets/fonts', 'fonts');
 
-await engine('docx', ['vendor/superdoc', 'engines/docx'], async () => {
+await engine('docx', ['vendor/superdoc', 'engines/docx', 'src/documents/frameBridge.ts', 'src/documents/officeTypes.ts', 'src/documents/regionTypes.ts'], async () => {
   run('vendor/superdoc', 'pnpm', ['run', 'build:superdoc']);
   run('engines/docx', 'npm', ['run', 'build']);
   await publish('engines/docx/dist', 'docx');
@@ -81,7 +85,9 @@ await engine('docx', ['vendor/superdoc', 'engines/docx'], async () => {
   });
 });
 
-await engine('rhwp', ['vendor/rhwp'], async () => {
+await engine('rhwp', ['vendor/rhwp', 'vendor-patches/rhwp.patch', 'src/documents/officeTypes.ts', 'src/documents/regionTypes.ts'], async () => {
+  // A cancelled build may leave this ignored output incomplete; rebuild it afresh.
+  await rm(path.join(root, 'vendor/rhwp/pkg'), { recursive: true, force: true });
   run('vendor/rhwp', 'wasm-pack', ['build', '--target', 'web', '--release'], {
     CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? '2',
   });
@@ -97,7 +103,7 @@ await engine('rhwp', ['vendor/rhwp'], async () => {
   await publish('vendor/rhwp/rhwp-studio/dist', 'rhwp');
 });
 
-await engine('pptx', ['vendor/pptist'], async () => {
+await engine('pptx', ['vendor/pptist', 'src/documents/frameBridge.ts', 'src/documents/officeTypes.ts', 'src/documents/regionTypes.ts'], async () => {
   run('vendor/pptist', 'npm', ['run', 'build']);
   await publish('vendor/pptist/dist', 'pptx');
 });

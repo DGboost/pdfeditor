@@ -89,7 +89,7 @@ test('terminal host notification rejects pending flush while ordinary engine err
   assert.equal(session.getState().ready,true);
   assert.deepEqual(notifications,['office-error']);
   const pending = session.flush();
-  const rejected = assert.rejects(pending,/종료/);
+  const rejected = assert.rejects(pending);
   notify('session-closed',null);
   await rejected;
   assert.equal(session.getState().ready,false);

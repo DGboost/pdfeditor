@@ -179,6 +179,13 @@
   .pdf-editor-root .pdfe-filename { order: 1; flex: 1 0 100%; }
   .pdf-editor-root .text-edit-panel { position: absolute; inset: 0 0 0 auto; }
   .pdf-editor-root .pdfe-edit-panel-resizer { position: absolute; top: 0; bottom: 0; right: min(var(--pdfe-edit-panel-width, 380px), 100% - 12px); }
+  .pdf-editor-root section[aria-label="문서 분석"] { max-height: 96px; overflow-y: auto; }
+  .pdf-editor-root nav[aria-label="편집 방식"] { flex-wrap: wrap; }
+  .pdf-editor-root .pdfe-region-toolbar { max-height: 108px; overflow-y: auto; flex-shrink: 0; }
+  .pdf-editor-root .pdfe-region-layout { flex-direction: column; min-width: 0; }
+  .pdf-editor-root .pdfe-region-source,
+  .pdf-editor-root .pdfe-region-cards { flex: 1 1 50% !important; min-height: 0; width: 100% !important; }
+  .pdf-editor-root .pdfe-region-cards { max-width: none !important; border-left: 0 !important; border-top: 1px solid var(--pdfe-border); }
 }
 .pdf-editor-root .pdfe-segmented { display: flex; padding: 4px; gap: 4px; border-radius: 9999px; background: var(--pdfe-selected); }
 @media (prefers-reduced-motion: reduce) {

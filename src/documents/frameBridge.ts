@@ -1,9 +1,10 @@
 import { OFFICE_COMMAND_TYPES } from './officeTypes';
-import type { CommandResult, OfficeCheckpoint, OfficeCommand, OfficeFrameOpen, OfficePageCommand, OfficeSession, OfficeSessionOptions, OfficeState } from './officeTypes';
+import type { CommandResult, OfficeCheckpoint, OfficeCommand, OfficeFrameOpen, OfficePageCommand, OfficeSession, OfficeSessionOptions, OfficeState, SourceAnalysis } from './officeTypes';
+import type { OfficeRegionTarget } from './regionTypes';
 
 const CHANNEL = 'pdfeditor-engine';
 const VERSION = 1;
-const methods = ['open', 'execute', 'pageExecute', 'pageThumbnail', 'flush', 'captureCheckpoint', 'serialize', 'dispose'] as const;
+const methods = ['open', 'execute', 'pageExecute', 'pageThumbnail', 'regionTargets', 'regionCapture', 'regionReplace', 'regionHighlight', 'regionSetMode', 'regionScroll', 'flush', 'captureCheckpoint', 'serialize', 'dispose'] as const;
 type Method = typeof methods[number];
 type Envelope = { channel: typeof CHANNEL; version: typeof VERSION; sessionId: string; requestId: number; type: string; payload: unknown };
 type Pending = { resolve(value: unknown): void; reject(reason: unknown): void; type: Method };
@@ -35,11 +36,52 @@ function color(value: unknown): boolean {
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
 }
+function assertRegionTarget(value: unknown): asserts value is OfficeRegionTarget {
+  requireValue(object(value) && text(value.locator) && typeof value.text === 'string' && Array.isArray(value.boxes)
+    && (value.reason === undefined || text(value.reason)), 'invalid region target');
+  for (const box of value.boxes) {
+    requireValue(object(box) && exactKeys(box, ['x', 'y', 'width', 'height'])
+      && typeof box.x === 'number' && Number.isFinite(box.x)
+      && typeof box.y === 'number' && Number.isFinite(box.y)
+      && positive(box.width) && positive(box.height), 'invalid region geometry');
+  }
+}
+function assertRegionLocators(value: unknown): asserts value is string[] {
+  requireValue(Array.isArray(value) && value.every(locator => text(locator)), 'invalid region locators');
+}
+function assertRegionResult(value: unknown): asserts value is CommandResult {
+  requireValue(object(value) && (value.ok === true || (value.ok === false && text(value.reason))), 'invalid region result');
+}
+function assertRegionReplaceResult(value: unknown, size: number): asserts value is { ok: true; targets: OfficeRegionTarget[] } | { ok: false; reason: string } {
+  requireValue(object(value), 'invalid region replacement result');
+  if (value.ok === false) requireValue(text(value.reason), 'invalid region replacement reason');
+  else {
+    requireValue(value.ok === true && Array.isArray(value.targets) && value.targets.length === size, 'invalid rebased region targets');
+    value.targets.forEach(assertRegionTarget);
+  }
+}
 function formatValue(value: unknown, check: (value: unknown) => boolean): boolean {
   if (!object(value)) return false;
   if (value.kind === 'uniform') return exactKeys(value, ['kind', 'value']) && check(value.value);
   if (value.kind === 'mixed') return exactKeys(value, ['kind']);
   return value.kind === 'unavailable' && exactKeys(value, ['kind', 'reason']) && text(value.reason);
+}
+
+function assertCountMetric(value: unknown): void {
+  requireValue(object(value), 'invalid analysis metric');
+  if (value.kind === 'available') {
+    requireValue(exactKeys(value, ['kind', 'count']) && integer(value.count), 'invalid available analysis count');
+  } else {
+    requireValue(value.kind === 'unavailable' && exactKeys(value, ['kind', 'reason']) && text(value.reason), 'invalid unavailable analysis reason');
+  }
+}
+
+function assertSourceAnalysis(value: unknown): asserts value is SourceAnalysis {
+  requireValue(object(value) && ['docx', 'hwp', 'hwpx'].includes(value.format as string), 'invalid office analysis format');
+  requireValue(exactKeys(value, ['format', 'pageCount', 'textLineCount', 'nativeTableCount', 'nativeFieldCount']), 'invalid source analysis shape');
+  for (const key of ['pageCount', 'textLineCount', 'nativeTableCount', 'nativeFieldCount']) {
+    assertCountMetric(value[key]);
+  }
 }
 
 export function assertOfficeState(value: unknown, sessionId: string, previous?: OfficeState): OfficeState {
@@ -69,6 +111,7 @@ export function assertOfficeState(value: unknown, sessionId: string, previous?: 
   requireValue(formatValue(value.formatting.fontFamily, text) && formatValue(value.formatting.fontSize, positive) && formatValue(value.formatting.color, color), 'invalid character formatting');
   requireValue(Array.isArray(value.fonts) && value.fonts.every(item => object(item) && text(item.value) && text(item.label)), 'invalid fonts');
   requireValue(strings(value.warnings), 'invalid warnings');
+  if (value.sourceAnalysis !== undefined) assertSourceAnalysis(value.sourceAnalysis);
   return value as unknown as OfficeState;
 }
 
@@ -197,9 +240,16 @@ export async function createFrameSession(options: OfficeSessionOptions, relative
       catch (error) { pending.delete(id); reject(error); }
     });
   }
+  let serialized: Promise<void> = Promise.resolve();
+  function ordered<T>(action: () => Promise<T>): Promise<T> {
+    const result = serialized.then(action);
+    serialized = result.then(() => undefined, () => undefined);
+    return result;
+  }
   function acceptState(value: unknown): void {
     const next = assertOfficeState(value, options.sessionId, state);
     requireValue(next.revision >= request.initialRevision, 'state predates restored document');
+    if (next.sourceAnalysis) requireValue(next.sourceAnalysis.format === request.format, 'source analysis format mismatch');
     state = next;
     for (const listener of listeners) listener(next);
   }
@@ -255,7 +305,7 @@ export async function createFrameSession(options: OfficeSessionOptions, relative
       ...(state.pageView ? { pageView: {
         async execute(command: OfficePageCommand) {
           assertPageCommand(command);
-          const result = await rpc('pageExecute', command);
+          const result = await ordered(() => rpc('pageExecute', command));
           requireValue(object(result) && (result.ok === true || (result.ok === false && text(result.reason))), 'invalid page command result');
           return result as CommandResult;
         },
@@ -269,25 +319,66 @@ export async function createFrameSession(options: OfficeSessionOptions, relative
           return result;
         },
       } } : {}),
+      ...(request.format !== 'pptx' ? { region: {
+        async targets(locators: string[]) {
+          assertRegionLocators(locators);
+          const result = await ordered(() => rpc('regionTargets', locators));
+          requireValue(Array.isArray(result), 'invalid region targets');
+          result.forEach(assertRegionTarget);
+          return result as OfficeRegionTarget[];
+        },
+        async capture() {
+          const result = await ordered(() => rpc('regionCapture', null));
+          if (result !== null) assertRegionTarget(result);
+          return result as OfficeRegionTarget | null;
+        },
+        async replace(locator: string, expectedText: string, value: string, expectedRevision: number, locatorsToRebase: string[]) {
+          assertRegionLocators(locatorsToRebase);
+          requireValue(text(locator) && locatorsToRebase.includes(locator) && typeof expectedText === 'string'
+            && typeof value === 'string' && integer(expectedRevision), 'invalid region replacement');
+          const result = await ordered(() => rpc('regionReplace', { locator, expectedText, value, expectedRevision, locatorsToRebase }));
+          assertRegionReplaceResult(result, locatorsToRebase.length);
+          return result;
+        },
+        async highlight(locator: string) {
+          requireValue(text(locator), 'invalid region highlight');
+          const result = await ordered(() => rpc('regionHighlight', locator));
+          assertRegionResult(result);
+          return result;
+        },
+        async setMode(mode: 'normal' | 'mapping' | 'protected') {
+          requireValue(['normal', 'mapping', 'protected'].includes(mode), 'invalid region mode');
+          await ordered(() => rpc('regionSetMode', mode));
+        },
+        async scroll(dx: number, dy: number) {
+          requireValue(Number.isFinite(dx) && Number.isFinite(dy), 'invalid region scroll');
+          await ordered(() => rpc('regionScroll', { dx, dy }));
+        },
+      } } : {}),
       getState() { requireValue(state, 'state unavailable'); return state; },
       subscribe(listener) { if (disposed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener); }; },
       async execute(command) {
         assertCommand(command);
         requireValue(state, 'state unavailable');
-        const result = await rpc('execute', { command, selectionRevision: state.selectionRevision });
+        const selectionRevision = state.selectionRevision;
+        const result = await ordered(() => rpc('execute', { command, selectionRevision }));
         requireValue(object(result) && (result.ok === true || (result.ok === false && text(result.reason))), 'invalid command result');
         return result as CommandResult;
       },
-      async flush() { const result = await rpc('flush', null); requireValue(typeof result === 'boolean', 'invalid flush result'); return result; },
+      async flush() { const result = await ordered(() => rpc('flush', null)); requireValue(typeof result === 'boolean', 'invalid flush result'); return result; },
       async captureCheckpoint() {
-        const floor = state!.revision;
-        const result = await rpc('captureCheckpoint', null);
+        const { floor, result } = await ordered(async () => {
+          const floor = state!.revision;
+          return { floor, result: await rpc('captureCheckpoint', null) };
+        });
         assertCapture(result, request.format, floor, false);
         return result as { revision: number; checkpoint: OfficeCheckpoint };
       },
       async serialize() {
-        const floor = state!.revision;
-        const result = await rpc('serialize', null);
+        const { floor, result } = await ordered(async () => {
+          const floor = state!.revision;
+          return { floor, result: await rpc('serialize', null) };
+        });
         assertCapture(result, request.format, floor, true);
         return result as { revision: number; bytes: Blob; warnings: string[] };
       },
@@ -403,6 +494,46 @@ export function serveOfficeFrame(open: (request: OfficeFrameOpen, sessionId: str
           publish(session.getState());
           assertPageRevision(state, page, renderRevision);
           assertThumbnail(result);
+        } else if (message.type === 'regionTargets') {
+          requireValue(session.region && format !== 'pptx', 'region unavailable');
+          assertRegionLocators(message.payload);
+          result = await session.region.targets(message.payload);
+          requireValue(Array.isArray(result), 'invalid region targets');
+          result.forEach(assertRegionTarget);
+        } else if (message.type === 'regionCapture') {
+          requireValue(session.region && format !== 'pptx' && message.payload === null, 'region unavailable');
+          result = await session.region.capture();
+          if (result !== null) assertRegionTarget(result);
+        } else if (message.type === 'regionReplace') {
+          requireValue(session.region && format !== 'pptx' && object(message.payload)
+            && exactKeys(message.payload, ['locator', 'expectedText', 'value', 'expectedRevision', 'locatorsToRebase'])
+            && text(message.payload.locator)
+            && typeof message.payload.expectedText === 'string' && typeof message.payload.value === 'string'
+            && integer(message.payload.expectedRevision), 'invalid region replacement');
+          assertRegionLocators(message.payload.locatorsToRebase);
+          requireValue(message.payload.locatorsToRebase.includes(message.payload.locator), 'replacement target missing from rebasing list');
+          const current = session.getState();
+          result = current.busy || current.composing || !current.canSaveModified || current.revision !== message.payload.expectedRevision
+            ? { ok: false, reason: '문서 또는 입력 상태가 변경되었습니다.' }
+            : await session.region.replace(message.payload.locator, message.payload.expectedText, message.payload.value,
+              message.payload.expectedRevision, message.payload.locatorsToRebase);
+          assertRegionReplaceResult(result, message.payload.locatorsToRebase.length);
+        } else if (message.type === 'regionHighlight') {
+          requireValue(session.region && format !== 'pptx' && text(message.payload), 'invalid region highlight');
+          result = await session.region.highlight(message.payload);
+          assertRegionResult(result);
+        } else if (message.type === 'regionSetMode') {
+          requireValue(session.region && format !== 'pptx'
+            && (message.payload === 'normal' || message.payload === 'mapping' || message.payload === 'protected'), 'invalid region mode');
+          await session.region.setMode(message.payload);
+          result = null;
+        } else if (message.type === 'regionScroll') {
+          requireValue(session.region && format !== 'pptx' && object(message.payload)
+            && exactKeys(message.payload, ['dx', 'dy'])
+            && typeof message.payload.dx === 'number' && Number.isFinite(message.payload.dx)
+            && typeof message.payload.dy === 'number' && Number.isFinite(message.payload.dy), 'invalid region scroll');
+          await session.region.scroll(message.payload.dx, message.payload.dy);
+          result = null;
         } else {
           requireValue(message.payload === null, 'invalid RPC payload');
           if (message.type === 'flush') {

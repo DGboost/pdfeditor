@@ -3,6 +3,7 @@ import type { DocumentFormat, OfficeFormat } from './formats';
 import { hashSource } from './files';
 import { OFFICE_ENGINES } from './officeTypes';
 import type { OfficeRecord, OfficeRecordSummary, OfficeRetainedSummary } from './officeTypes';
+import { validateRegionConfig } from './regionTypes';
 
 class InvalidOfficeRecordError extends Error {}
 
@@ -19,6 +20,10 @@ function recordShape(value: unknown): OfficeRecord {
   if (!object(value.engine) || value.engine.id !== engine.id || value.engine.version !== engine.version) throw new InvalidOfficeRecordError('저장된 엔진 버전과 현재 엔진이 다릅니다. 원본과 이전 기록을 백업에 보존합니다.');
   if (!counter(value.checkpointSequence) || !counter(value.revision) || !positive(value.zoom) || !counter(value.savedAt) || typeof value.modified !== 'boolean' || typeof value.pptxConversionAccepted !== 'boolean') throw new InvalidOfficeRecordError('저장된 문서 상태가 올바르지 않습니다.');
   if (value.format === 'pptx' && !value.pptxConversionAccepted) throw new InvalidOfficeRecordError('PPTX 변환 편집 동의가 없는 기록입니다.');
+  if (value.region !== undefined) {
+    if (value.format === 'pptx') throw new InvalidOfficeRecordError('PPTX에는 영역 편집 매핑을 저장할 수 없습니다.');
+    validateRegionConfig(value.region, value.format as 'docx' | 'hwp' | 'hwpx');
+  }
   if (!value.modified && value.revision !== 0) throw new InvalidOfficeRecordError('수정 상태와 문서 revision이 일치하지 않습니다.');
   const checkpoint = value.checkpoint;
   if (checkpoint === null) {
